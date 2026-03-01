@@ -19,8 +19,14 @@ elif [[ $(uname -s) =~ MINGW64_NT ]]; then
     fi
 fi
 
-echo -n "Running: " ; "$PY" --version
-exit 1
+PYV=$("$PY" --version)
+echo "Running: $PYV"
+DIR="${DIR}_${PYV/Python /}"
+echo "Venv DIR: $DIR"
+if [[ -z "$PYV" ]]; then
+    echo "Python version not found. Aborting."
+    exit 1
+fi
 
 if [[ ! -d $DIR ]]; then
     set -x
