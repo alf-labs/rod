@@ -36,6 +36,7 @@ if [[ ! -d $DIR ]]; then
         BIN="$DIR/Scripts"  # on Git Bash
     fi
     source $BIN/activate
+    $BIN/python -m pip install --upgrade pip
     if [[ $(uname -s) =~ _NT ]]; then
         echo "WARNING: Building opencv-python under Cygwin takes forever."
         $BIN/pip install numpy imutils flask
