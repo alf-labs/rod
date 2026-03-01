@@ -12,7 +12,7 @@ if [[ $(uname -s) =~ CYGWIN_NT ]]; then
     # Cygwin currently offers 3.9 and 3.12. Fails with the latter.
     PY="python3.9"
 elif [[ $(uname -s) =~ MINGW64_NT ]]; then
-    # This is either Git Bash or MingW.
+    # This is likely Git Bash.
     if [[ ! $("$PY" --version) ]]; then
         PPY=$(cygpath "$LOCALAPPDATA\Programs\Python\Python3")
         PY="$PPY/python.exe"
@@ -31,12 +31,16 @@ fi
 if [[ ! -d $DIR ]]; then
     set -x
     "$PY" -m venv --system-site-packages $DIR
-    source $DIR/bin/activate
-    if [[ $(uname -s) =~ CYGWIN ||  $(uname -s) =~ MINGW64_NT ]]; then
+    BIN="$DIR/bin"
+    if [[ ! -d "$BIN" && -d "$DIR/Scripts" ]]; then
+        BIN="$DIR/Scripts"  # on Git Bash
+    fi
+    source $BIN/activate
+    if [[ $(uname -s) =~ _NT ]]; then
         echo "WARNING: Building opencv-python under Cygwin takes forever."
-        $DIR/bin/pip install numpy imutils flask
-        nice $DIR/bin/pip install --verbose opencv-python
+        $BIN/pip install numpy imutils flask
+        nice $BIN/pip install --verbose opencv-python
     else
-        $DIR/bin/pip install opencv-python numpy imutils flask
+        $BIN/pip install opencv-python numpy imutils flask
     fi
 fi
