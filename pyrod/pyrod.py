@@ -36,15 +36,34 @@ class Main:
     def run(self):
         print("@@ Run")
 
+        cv2.namedWindow(WINDOW_TITLE, cv2.WINDOW_NORMAL)
+        cv2.resizeWindow(WINDOW_TITLE, 1920//2, 1080//2)
+
         cap = cv2.VideoCapture(VIDEOS[0])
+        height = 0
+        width = 0
         try:
             while cap.isOpened():
                 ret, frame = cap.read()
                 if not ret:
                     break
                 cv2.imshow(WINDOW_TITLE, frame)
-                if cv2.waitKey(FPS_MS) & 0xFF == ord('q'):
+
+                if width == 0:
+                    height, width = frame.shape[:2]
+
+                key = cv2.waitKey(FPS_MS) & 0xFF
+                if key == ord('q'):
                     break
+                elif key == ord('1'):
+                    cv2.resizeWindow(WINDOW_TITLE, width, height)
+                elif key == ord('2'):
+                    cv2.resizeWindow(WINDOW_TITLE, width//2, height//2)
+                elif key == ord('3'):
+                    cv2.resizeWindow(WINDOW_TITLE, width//3, height//3)
+                elif key == ord('4'):
+                    cv2.resizeWindow(WINDOW_TITLE, width//4, height//4)
+
         finally:
             cap.release()
             cv2.destroyAllWindows()
