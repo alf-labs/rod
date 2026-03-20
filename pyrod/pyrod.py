@@ -51,20 +51,63 @@ def detect_edges_sobel_canny(frame):
     return masked_edges
 
 
+def draw_line(source, channel_index, y, color, dest):
+    if source.ndim == 3:
+        channel = source[:, :, channel_index]
+    else:
+        channel = source
+
+    h, w = dest.shape[:2]
+    if y < 0:
+        y = h + y
+
+    lx = 0
+    ly = int(channel[y, 0])
+    dy = h - 10
+    for x in range(1, w):
+        curr = int(channel[y, x])
+        cv2.line(dest, (lx, dy - ly), (x, dy - curr), color, 2)
+        lx = x
+        ly = curr
+
+
 def detect_by_color_lab(frame):
     # image = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
-    image = cv2.cvtColor(frame, cv2.COLOR_BGR2LAB)
+    lab = cv2.cvtColor(frame, cv2.COLOR_BGR2LAB)
 
-    channel = image[:, :, 0] # L
+    # channel = lab[:, :, 0] # L
 
-    mask = cv2.inRange(channel, 120, 150)
-    result = cv2.bitwise_and(frame, frame, mask=mask)
+    # mask = cv2.inRange(channel, 140, 160)
+    # result = cv2.bitwise_and(frame, frame, mask=mask)
 
     # rgb = cv2.cvtColor(mask, cv2.COLOR_GRAY2BGR)
 
-# lower_gray = np.array([125, 125, 125])
-# upper_gray = np.array([131, 131, 131])
-# mask = cv2.inRange(image, lower_gray, upper_gray)
+
+    lu, au, bu = cv2.split(lab)     # uint8
+    aS = au.astype(np.int16) - 128
+    bS = bu.astype(np.int16) - 128
+    ab_diff = np.abs(aS - bS)
+    ab_diff_output = ab_diff.astype(np.uint8)
+    # result = cv2.cvtColor(ab_diff_output, cv2.COLOR_GRAY2BGR)
+
+    # # L, a, b filter
+    # lower_lab = np.array([128, 125, 125])
+    # upper_lab = np.array([255, 131, 131])
+    # mask = cv2.inRange(lab, lower_lab, upper_lab)
+    # result = cv2.bitwise_and(frame, frame, mask=mask)
+
+    # L filter
+    mask = cv2.inRange(lu, 128, 170)
+    result = cv2.bitwise_and(frame, frame, mask=mask)
+    # a-b filter
+    mask = cv2.inRange(ab_diff_output, 0, 4)
+    result = cv2.bitwise_and(result, result, mask=mask)
+
+    draw_line(ab_diff_output, 0, -1, (0, 255, 255), result)
+    draw_line(lab, 0, -1, (0, 0, 255), result)
+    # draw_line(lab, 1, -1, (0, 255, 255), result)
+    # draw_line(lab, 2, -1, (255, 0, 255), result)
+
     return result
 
 def detect_by_color_hsv(frame):
@@ -172,13 +215,34 @@ class RodRemover:
 
 class Main:
     def __init__(self):
-        pass
+        self.mx = 0
+        self.my = 0
+        self.zoom = 1
+
+    def print_mouse_rgb(self, source, dest):
+        x = self.mx
+        y = self.my
+        z = self.zoom
+        b,g,r = source[y, x]
+        text = f"X: {x}, Y: {y} | R: {r} G: {g} B: {b}"
+        # cv2.rectangle(frame, (x + 10, y - 30), (x + 300, y), (0, 0, 0), -1)
+        cv2.putText(dest, text,
+            (10 * z, 20 * z),           # bottom-left coord
+            cv2.FONT_HERSHEY_SIMPLEX,   # font
+            z / 2,             # font scale
+            (255, 255, 255),            # color
+            z * 2)                  # line thickness
 
     def run(self):
         print("@@ Run")
 
         cv2.namedWindow(WINDOW_TITLE, cv2.WINDOW_NORMAL)
         cv2.resizeWindow(WINDOW_TITLE, 1920//2, 1080//2)
+        def _mouse_callback(event, x, y, flags, param):
+            if event == cv2.EVENT_MOUSEMOVE:
+                self.mx = x
+                self.my = y
+        cv2.setMouseCallback(WINDOW_TITLE, _mouse_callback)
 
         remover = RodRemover(alpha=0.7) # Adjust alpha for more/less 'memory'
 
@@ -199,21 +263,28 @@ class Main:
                 # clean_frame, mask_viz = remover.process_frame(frame)
                 # result = mask_viz
 
+                self.print_mouse_rgb(frame, result)
+
                 cv2.imshow(WINDOW_TITLE, result)
 
                 if width == 0:
                     height, width = frame.shape[:2]
+                    print(f"Video size: {width}x{height}")
 
                 key = cv2.waitKey(FPS_MS) & 0xFF
                 if key == ord('q'):
                     break
                 elif key == ord('1'):
+                    self.zoom = 1
                     cv2.resizeWindow(WINDOW_TITLE, width, height)
                 elif key == ord('2'):
+                    self.zoom = 2
                     cv2.resizeWindow(WINDOW_TITLE, width//2, height//2)
                 elif key == ord('3'):
+                    self.zoom = 3
                     cv2.resizeWindow(WINDOW_TITLE, width//3, height//3)
                 elif key == ord('4'):
+                    self.zoom = 4
                     cv2.resizeWindow(WINDOW_TITLE, width//4, height//4)
 
         finally:
