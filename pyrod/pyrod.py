@@ -213,7 +213,7 @@ class RodRemover:
         return result, binary_mask
 
 
-class Detector:
+class DetectorBase:
     def __init__(self):
         # Overlay is (B,G,R)
         self.overlay = None
@@ -229,6 +229,14 @@ class Detector:
         _, mask = cv2.threshold(gray_overlay, 1, 255, cv2.THRESH_BINARY)
         src_dst[mask > 0] = self.overlay[mask > 0]
         return src_dst
+
+    def filter(self, frame):
+        return frame
+
+
+class Detector1(DetectorBase):
+    def __init__(self):
+        DetectorBase.__init__(self)
 
     def filter(self, frame):
         lab = cv2.cvtColor(frame, cv2.COLOR_BGR2LAB)
@@ -299,7 +307,7 @@ class Main:
         height = 0
         loop_s = 0
         init_once = True
-        detector = Detector()
+        detector = Detector1()
 
         cap = cv2.VideoCapture(VIDEOS[0])
         try:
