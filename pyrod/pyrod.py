@@ -212,6 +212,44 @@ class RodRemover:
         return result, binary_mask
 
 
+class Detector:
+    def __init__(self):
+        # Overlay is (B,G,R)
+        self.overlay = None
+
+    def init_overlay(self, frame):
+        if self.overlay is None:
+            self.overlay = np.zeros_like(frame)
+        else:
+            self.overlay[:] = (0, 0, 0)
+ 
+    def combine_overlay(self, src_dst):
+        gray_overlay = cv2.cvtColor(self.overlay, cv2.COLOR_BGR2GRAY)
+        _, mask = cv2.threshold(gray_overlay, 1, 255, cv2.THRESH_BINARY)
+        src_dst[mask > 0] = self.overlay[mask > 0]
+        return src_dst
+
+    def filter(self, frame):
+        lab = cv2.cvtColor(frame, cv2.COLOR_BGR2LAB)
+
+        lu, au, bu = cv2.split(lab)     # uint8
+        aS = au.astype(np.int16) - 128
+        bS = bu.astype(np.int16) - 128
+        ab_diff = np.abs(aS - bS)
+        ab_diff_output = ab_diff.astype(np.uint8)
+
+        # L filter
+        mask = cv2.inRange(lu, 128, 170)
+        result = cv2.bitwise_and(frame, frame, mask=mask)
+        # a-b filter
+        mask = cv2.inRange(ab_diff_output, 0, 4)
+        result = cv2.bitwise_and(result, result, mask=mask)
+
+        draw_line(ab_diff_output, 0, -1, (0, 255, 255), self.overlay)
+        draw_line(lab, 0, -1, (0, 0, 255), self.overlay)
+
+        return result
+
 
 class Main:
     def __init__(self):
@@ -244,32 +282,27 @@ class Main:
                 self.my = y
         cv2.setMouseCallback(WINDOW_TITLE, _mouse_callback)
 
-        remover = RodRemover(alpha=0.7) # Adjust alpha for more/less 'memory'
+        width = 0
+        height = 0
+        init_once = True
+        detector = Detector()
 
         cap = cv2.VideoCapture(VIDEOS[0])
-        height = 0
-        width = 0
         try:
             while cap.isOpened():
                 ret, frame = cap.read()
                 if not ret:
                     break
 
-                # result = detect_edges_sobel_canny(frame)
-                result = detect_by_color_lab(frame)
-                # result = detect_by_color_hsv(frame)
-                # result = detect_hough_lines(frame)
-
-                # clean_frame, mask_viz = remover.process_frame(frame)
-                # result = mask_viz
-
-                self.print_mouse_rgb(frame, result)
-
-                cv2.imshow(WINDOW_TITLE, result)
-
-                if width == 0:
+                if init_once:
                     height, width = frame.shape[:2]
                     print(f"Video size: {width}x{height}")
+                    init_once = False
+
+                detector.init_overlay(frame)
+                result = detector.filter(frame)
+                self.print_mouse_rgb(frame, detector.overlay)
+                cv2.imshow(WINDOW_TITLE, detector.combine_overlay(result))
 
                 key = cv2.waitKey(FPS_MS) & 0xFF
                 if key == ord('q'):
