@@ -53,20 +53,24 @@ def detect_edges_sobel_canny(frame):
 
 
 def draw_line(source, channel_index, y, color, dest):
+    
     if source.ndim == 3:
         channel = source[:, :, channel_index]
+        cvalue = lambda x: int(channel[y, x])
+    elif source.ndim == 2:
+        cvalue = lambda x: int(source[y, x])
     else:
-        channel = source
-
+        cvalue = lambda x: int(source[x])
+    
     h, w = dest.shape[:2]
     if y < 0:
         y = h + y
 
     lx = 0
-    ly = int(channel[y, 0])
+    ly = cvalue(0)
     dy = h - 10
     for x in range(1, w):
-        curr = int(channel[y, x])
+        curr = cvalue(x)
         cv2.line(dest, (lx, dy - ly), (x, dy - curr), color, 2)
         lx = x
         ly = curr
@@ -260,6 +264,70 @@ class Detector1(DetectorBase):
         return result
 
 
+class Detector2(DetectorBase):
+    def __init__(self):
+        DetectorBase.__init__(self)
+
+    def cv_opencv_optimized(self, sample):
+        # Coefficient of Variation (CV)
+        # Standard CV calculation using OpenCV's optimized core
+        mu, sigma = cv2.meanStdDev(sample)
+        mu_val = mu[0][0]
+        sigma_val = sigma[0][0]
+        return sigma_val / mu_val if mu_val > 0 else 0.0
+
+    def get_cv_vectorized(self, strip):
+        """
+        Coefficient of Variation (CV)
+        Calculates CV for all columns in a strip simultaneously.
+        'strip' should be a (10, width) array.
+        """
+        # Convert to float32 for math
+        data = strip.astype(np.float32)
+        
+        # Calculate mean and std across the vertical axis (axis 0)
+        means = np.mean(data, axis=0)
+        stds = np.std(data, axis=0)
+        
+        # Avoid division by zero: where mean is 0, CV is 0
+        # Using np.divide with 'where' condition handles this cleanly
+        cv_array = np.divide(stds, means, out=np.zeros_like(stds), where=means > 0)
+        
+        return cv_array
+
+    def filter(self, frame):
+        lab = cv2.cvtColor(frame, cv2.COLOR_BGR2LAB)
+
+        lu, au, bu = cv2.split(lab)     # uint8
+
+        aS = au.astype(np.int16) - 128
+        bS = bu.astype(np.int16) - 128
+        ab_diff = np.abs(aS - bS)
+        ab_diff = ab_diff.astype(np.uint8)
+
+        # if False:
+        #     # 2. Extract the bottom 10 rows for all columns
+        #     # Shape will be (10, width)
+        #     bottom_strip = lu[-10:, :]
+        #     _, width = lu.shape
+        #     cv_results = np.zeros(width, dtype=np.float32)
+
+        #     for x in range(width):
+        #         # Extract the 10-pixel vertical sample for this column
+        #         column_sample = bottom_strip[:, x]
+        #         cv_results[x] = self.cv_opencv_optimized(column_sample)
+        # else:
+        cv_lu = self.get_cv_vectorized(lu[-10:, :])
+        cv_ab = self.get_cv_vectorized(ab_diff[-10:, :])
+
+        cv_disp_lu_1d = np.clip(cv_lu * 1000, a_min=None, a_max=255)
+        cv_disp_ab_1d = np.clip(cv_ab * 1000, a_min=None, a_max=255)
+        draw_line(cv_disp_lu_1d, 0, -1, (0, 255, 255), self.overlay)
+        draw_line(cv_disp_ab_1d, 0, -1, (255, 0, 255), self.overlay)
+
+        return frame
+
+
 class Main:
     def __init__(self):
         self.mx = 0
@@ -309,8 +377,10 @@ class Main:
         height = 0
         loop_s = 0
         init_once = True
-        detector = Detector1()
         frame_count = 0
+
+        # detector = Detector1()
+        detector = Detector2()
 
         cap = cv2.VideoCapture(VIDEOS[0])
         try:
