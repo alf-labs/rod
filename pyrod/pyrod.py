@@ -8,6 +8,7 @@ IS_RPI = os.path.isfile("/etc/rpi-issue")
 
 import base64
 import sys
+import time
 
 try:
     import cv2
@@ -271,6 +272,18 @@ class Main:
             (255, 255, 255),            # color
             z * 2)                  # line thickness
 
+    def print_fps(self, loop_s, dest):
+        fps = 1/loop_s if loop_s > 0 else 0
+        ms = int(loop_s * 1000)
+        text = f"{ms} ms, {fps:.2f} fps"
+        z = self.zoom
+        cv2.putText(dest, text,
+            (10 * z, 30 * z),           # bottom-left coord
+            cv2.FONT_HERSHEY_DUPLEX,    # font
+            z,                          # font scale
+            (0, 255, 255),              # color
+            z )                         # line thickness
+
     def run(self):
         print("@@ Run")
 
@@ -284,12 +297,14 @@ class Main:
 
         width = 0
         height = 0
+        loop_s = 0
         init_once = True
         detector = Detector()
 
         cap = cv2.VideoCapture(VIDEOS[0])
         try:
             while cap.isOpened():
+                start_loop_s = time.perf_counter()
                 ret, frame = cap.read()
                 if not ret:
                     break
@@ -301,7 +316,9 @@ class Main:
 
                 detector.init_overlay(frame)
                 result = detector.filter(frame)
-                self.print_mouse_rgb(frame, detector.overlay)
+
+                #self.print_mouse_rgb(frame, detector.overlay)
+                self.print_fps(loop_s, detector.overlay)
                 cv2.imshow(WINDOW_TITLE, detector.combine_overlay(result))
 
                 key = cv2.waitKey(FPS_MS) & 0xFF
@@ -319,7 +336,8 @@ class Main:
                 elif key == ord('4'):
                     self.zoom = 4
                     cv2.resizeWindow(WINDOW_TITLE, width//4, height//4)
-
+                end_loop_s = time.perf_counter()
+                loop_s = end_loop_s - start_loop_s
         finally:
             cap.release()
             cv2.destroyAllWindows()
