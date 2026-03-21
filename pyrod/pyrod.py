@@ -248,7 +248,7 @@ class Detector1(DetectorBase):
         ab_diff_output = ab_diff.astype(np.uint8)
 
         # L filter
-        mask = cv2.inRange(lu, 128, 170)
+        mask = cv2.inRange(lu, 128, 180)
         result = cv2.bitwise_and(frame, frame, mask=mask)
         # a-b filter
         mask = cv2.inRange(ab_diff_output, 0, 4)
@@ -265,6 +265,8 @@ class Main:
         self.mx = 0
         self.my = 0
         self.zoom = 1
+        self.view_org = False
+        self.skip_num = 1
 
     def print_mouse_rgb(self, source, dest):
         x = self.mx
@@ -308,6 +310,7 @@ class Main:
         loop_s = 0
         init_once = True
         detector = Detector1()
+        frame_count = 0
 
         cap = cv2.VideoCapture(VIDEOS[0])
         try:
@@ -316,6 +319,12 @@ class Main:
                 ret, frame = cap.read()
                 if not ret:
                     break
+
+                frame_count += 1
+                _skip_num = self.skip_num
+                if _skip_num > 1:
+                    if frame_count % _skip_num != 0:
+                        continue
 
                 if init_once:
                     height, width = frame.shape[:2]
@@ -327,11 +336,18 @@ class Main:
 
                 #self.print_mouse_rgb(frame, detector.overlay)
                 self.print_fps(loop_s, detector.overlay)
-                cv2.imshow(WINDOW_TITLE, detector.combine_overlay(result))
+                if self.view_org:
+                    cv2.imshow(WINDOW_TITLE, detector.combine_overlay(frame))
+                else:
+                    cv2.imshow(WINDOW_TITLE, detector.combine_overlay(result))
 
                 key = cv2.waitKey(FPS_MS) & 0xFF
                 if key == ord('q'):
                     break
+                elif key == ord('o'):
+                    self.view_org = not self.view_org
+                elif key == ord('s'):
+                    self.skip_num = 1 + self.skip_num % 4
                 elif key == ord('1'):
                     self.zoom = 1
                     cv2.resizeWindow(WINDOW_TITLE, width, height)
