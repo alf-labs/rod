@@ -295,7 +295,7 @@ class Detector2(DetectorBase):
         
         return cv_array
 
-    def filter(self, frame):
+    def filter_old(self, frame):
         lab = cv2.cvtColor(frame, cv2.COLOR_BGR2LAB)
 
         lu, au, bu = cv2.split(lab)     # uint8
@@ -326,6 +326,21 @@ class Detector2(DetectorBase):
         draw_line(cv_disp_ab_1d, 0, -1, (255, 0, 255), self.overlay)
 
         return frame
+
+    def filter(self, frame):
+        lab = cv2.cvtColor(frame, cv2.COLOR_BGR2LAB)
+
+        # lu, au, bu = cv2.split(lab)     # uint8
+        lu = lab[:, :, 0]
+        blur = cv2.GaussianBlur(lu, (21, 21), 0)  # kernel size
+
+        cv_lu = self.get_cv_vectorized(lu[-10:, :])
+
+        cv_disp_lu_1d = np.clip(cv_lu * 1000, a_min=None, a_max=255)
+        draw_line(cv_disp_lu_1d, 0, -1, (0, 255, 255), self.overlay)
+
+        rgb_result = cv2.cvtColor(blur, cv2.COLOR_GRAY2BGR)
+        return rgb_result
 
 
 class Main:
