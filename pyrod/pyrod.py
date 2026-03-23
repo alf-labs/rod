@@ -33,26 +33,26 @@ FPS_MS = 1000//FPS
 GRAPH_Y_OFFSET = 10
 NUM_BOTTOM_ROWS_CV_PCT = 20/720
 ROD_WIDTH = 30/1280
-ROD_WIDTH_DELTA = 5/1280
+ROD_WIDTH_DELTA = 10/1280
 
 def detect_edges_sobel_canny(frame):
     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-    
+
     # 1. Focus on vertical edges using Sobel X
     # ddepth=cv2.CV_64F helps catch the transition from light to dark and vice versa
     sobelx = cv2.Sobel(gray, cv2.CV_64F, 1, 0, ksize=3)
     abs_sobelx = np.absolute(sobelx)
     sobel_8bit = np.uint8(abs_sobelx)
-    
+
     # 2. Canny for cleaner lines
     edges = cv2.Canny(sobel_8bit, 50, 150)
-    
+
     # 3. Region of Interest (ROI) - Bottom Center
     h, w = edges.shape
     roi_mask = np.zeros_like(edges)
     cv2.rectangle(roi_mask, (int(w*0.4), int(h*0.5)), (int(w*0.6), h), 255, -1)
     masked_edges = cv2.bitwise_and(edges, roi_mask)
-    
+
     return masked_edges
 
 
@@ -64,7 +64,7 @@ def draw_line(source, channel_index, y, color, dest):
         cvalue = lambda x: int(source[y, x])
     else:
         cvalue = lambda x: int(source[x])
-    
+
     h, w = dest.shape[:2]
     if y < 0:
         y = h + y
@@ -123,37 +123,37 @@ def detect_by_color_hsv(frame):
 
     # Define 'Gray' range: Low saturation, mid-to-high value
     # Hue doesn't matter much for gray, so we take the full range (0-180)
-    lower_gray = np.array([0, 0, 50])   
+    lower_gray = np.array([0, 0, 50])
     upper_gray = np.array([180, 50, 200])
-    
+
     mask = cv2.inRange(hsv, lower_gray, upper_gray)
-    
+
     # Cleanup noise with Morphological Opening (Erosion followed by Dilation)
     kernel = np.ones((5,5), np.uint8)
     mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
-    
+
     return mask
 
 
 def detect_hough_lines(frame):
     # Start with the edge detection from method 1
     edges = detect_edges_sobel_canny(frame)
-    
+
     # Probabilistic Hough Transform
     # rho=1, theta=pi/180, threshold=50, minLineLength=100, maxLineGap=10
-    lines = cv2.HoughLinesP(edges, 1, np.pi/180, 50, 
+    lines = cv2.HoughLinesP(edges, 1, np.pi/180, 50,
                             minLineLength=100, maxLineGap=20)
-    
+
     line_img = np.zeros_like(frame)
     if lines is not None:
         for line in lines:
             x1, y1, x2, y2 = line[0]
             # Calculate angle: We only want vertical lines (approx 90 degrees)
             angle = np.abs(np.arctan2(y2 - y1, x2 - x1) * 180 / np.pi)
-            
+
             if 70 < angle < 110: # Vertical tolerance
                 cv2.line(line_img, (x1, y1), (x2, y2), (0, 255, 0), 2)
-                
+
     return line_img
 
 
@@ -167,7 +167,7 @@ class RodRemover:
         h, w = frame.shape[:2]
         # 1. Convert to HSV for robust color segmentation
         hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
-        
+
         # Define 'Neutral Gray' (Low saturation, specific value range)
         lower_gray = np.array([0, 0, 40])
         upper_gray = np.array([180, 60, 200])
@@ -186,7 +186,7 @@ class RodRemover:
         # 4. Contour Filter: Find the rod by its verticality
         contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         final_mask = np.zeros_like(mask)
-        
+
         for cnt in contours:
             x, y, w_c, h_c = cv2.boundingRect(cnt)
             aspect_ratio = h_c / float(w_c)
@@ -208,7 +208,7 @@ class RodRemover:
 
         # Threshold the blended mask to get a solid binary area for inpainting
         _, binary_mask = cv2.threshold(self.running_mask.astype(np.uint8), 50, 255, cv2.THRESH_BINARY)
-        
+
         # 6. Dilate slightly to ensure we cover the 'glow' or edges of the rod
         dilate_kernel = np.ones((5, 5), np.uint8)
         binary_mask = cv2.dilate(binary_mask, dilate_kernel, iterations=2)
@@ -216,7 +216,7 @@ class RodRemover:
         # 7. Inpaint: Fill the hole using surrounding textures
         # cv2.INPAINT_TELEA is generally faster for real-time video
         result = cv2.inpaint(frame, binary_mask, self.inpaint_radius, cv2.INPAINT_TELEA)
-        
+
         return result, binary_mask
 
 
@@ -234,7 +234,7 @@ class DetectorBase:
             self.overlay = np.zeros_like(frame)
         else:
             self.overlay[:] = (0, 0, 0)
- 
+
     def combine_overlay(self, src_dst):
         gray_overlay = cv2.cvtColor(self.overlay, cv2.COLOR_BGR2GRAY)
         _, mask = cv2.threshold(gray_overlay, 1, 255, cv2.THRESH_BINARY)
@@ -303,16 +303,75 @@ class Detector2(DetectorBase):
         """
         # Convert to float32 for math
         data = strip.astype(np.float32)
-        
+
         # Calculate mean and std across the vertical axis (axis 0)
         means = np.mean(data, axis=0)
         stds = np.std(data, axis=0)
-        
+
         # Avoid division by zero: where mean is 0, CV is 0
         # Using np.divide with 'where' condition handles this cleanly
         cv_array = np.divide(stds, means, out=np.zeros_like(stds), where=means > 0)
-        
+
         return cv_array
+
+    def detect_rod_prominence(self, cv_vector, center_weight=2.5):
+        """
+        Finds the rod by looking for the most prominent 'valley'
+        in the Coefficient of Variation signal.
+        """
+        # 1. Invert the signal: Low CV (rod) becomes a high peak
+        inverted_cv = -cv_vector
+
+        # 2. Find peaks based on Prominence
+        # We don't use a hard 'height' threshold; we let prominence do the work.
+        # width=(10, 50) allows for some blurring/flexing around the 30px target.
+        peaks, props = find_peaks(
+            inverted_cv,
+            prominence=0.10, # Minimum 'depth' of the valley to be considered
+            width=self.rod_delta_px,    # Looking for our ~30px rod
+            rel_height=0.5     # Calculate width at 50% of the prominence
+        )
+
+        if len(peaks) == 0:
+            return None
+
+        img_center = len(cv_vector) / 2
+        best_candidate = None
+        max_score = -1.0
+
+        scores = []
+        for i in range(len(peaks)):
+            idx = peaks[i]
+            prom = props['prominences'][i]
+            width = props['widths'][i]
+
+            # 3. Scoring: Combine Prominence and Center-Weighting
+            # Distance penalty (0.0 at center, increasing to ~0.7 at edges)
+            dist_factor = 1.0 / (1.0 + (abs(idx - img_center) / img_center) * center_weight)
+
+            # Total score: How 'valley-like' it is * How centered it is
+            score = prom * dist_factor
+
+            left_px = int(props['left_ips'][i])
+            right_px = int(props['right_ips'][i])
+
+            # Draw segment for debug
+            y = self.height - GRAPH_Y_OFFSET - min(255, int(100 * score))
+            cv2.line(self.overlay, (left_px, y), (right_px, y), (0, 0, 255), 2)
+            scores.append(score)
+
+            if score > max_score:
+                max_score = score
+                best_candidate = {
+                    'center': idx,
+                    'width': width,
+                    'prominence': prom,
+                    'score': score,
+                    'boundaries': (left_px, right_px)
+                }
+
+            print(scores)
+        return best_candidate
 
     def draw_peaks(self, peaks, threshold_y, color_threshold, color_peaks, dest):
         y = self.height - int(threshold_y) - GRAPH_Y_OFFSET
@@ -335,22 +394,27 @@ class Detector2(DetectorBase):
 
         cv_lu = self.get_cv_vectorized(lu[-self.num_bottom_rows_cv:, :])
 
-        # Adaptive thresholding
-        # threshold = np.percentile(cv_lu, 50)
-        threshold = 0.1
+        # Smooth the CV vector
+        cv_lu = np.convolve(cv_lu, np.ones(5)/5, mode='same')
 
-        print(f"CVs: min: {np.min(cv_lu):.3f}, mean: {np.mean(cv_lu):.3f}, max: {np.max(cv_lu):.3f}, threshold: {threshold:.3f}")
+        # # Adaptive thresholding
+        # # threshold = np.percentile(cv_lu, 50)
+        # threshold = 0.1
 
-        cv_lu = np.clip(cv_lu, a_min=None, a_max=threshold)
-        # Peak detection with width constraints
-        peaks, _ = find_peaks(
-            -cv_lu, # Invert for "valleys"
-            width=self.rod_delta_px,
-            # prominence=0.05
-            height=-threshold,  # Only valleys deeper than -threshold
-        )
-        
-        self.draw_peaks(peaks, np.clip(threshold * 1000, a_min=None, a_max=255).item(), (0, 255, 0), (0, 0, 255), self.overlay)    
+        # print(f"CVs: min: {np.min(cv_lu):.3f}, mean: {np.mean(cv_lu):.3f}, max: {np.max(cv_lu):.3f}, threshold: {threshold:.3f}")
+
+        # cv_lu = np.clip(cv_lu, a_min=None, a_max=threshold)
+        # # Peak detection with width constraints
+        # peaks, _ = find_peaks(
+        #     -cv_lu, # Invert for "valleys"
+        #     width=self.rod_delta_px,
+        #     # prominence=0.05
+        #     height=-threshold,  # Only valleys deeper than -threshold
+        # )
+        # self.draw_peaks(peaks, np.clip(threshold * 1000, a_min=None, a_max=255).item(), (0, 255, 0), (0, 0, 255), self.overlay)
+
+        self.detect_rod_prominence(cv_lu)
+
         cv_disp_lu_1d = np.clip(cv_lu * 1000, a_min=None, a_max=255)
         draw_line(cv_disp_lu_1d, 0, -1, (0, 255, 255), self.overlay)
 
@@ -414,12 +478,16 @@ class Main:
 
         cap = cv2.VideoCapture(VIDEOS[0])
         try:
+            last_frame = None
             while cap.isOpened():
                 start_loop_s = time.perf_counter()
-                if not paused:
+                if paused:
+                    frame = last_frame.copy()
+                else:
                     ret, frame = cap.read()
                     if not ret:
                         break
+                    last_frame = frame.copy()
 
                 frame_count += 1
                 _skip_num = self.skip_num
