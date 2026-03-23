@@ -35,27 +35,6 @@ NUM_BOTTOM_ROWS_CV_PCT = 20/720
 ROD_WIDTH = 30/1280
 ROD_WIDTH_DELTA = 10/1280
 
-def detect_edges_sobel_canny(frame):
-    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-
-    # 1. Focus on vertical edges using Sobel X
-    # ddepth=cv2.CV_64F helps catch the transition from light to dark and vice versa
-    sobelx = cv2.Sobel(gray, cv2.CV_64F, 1, 0, ksize=3)
-    abs_sobelx = np.absolute(sobelx)
-    sobel_8bit = np.uint8(abs_sobelx)
-
-    # 2. Canny for cleaner lines
-    edges = cv2.Canny(sobel_8bit, 50, 150)
-
-    # 3. Region of Interest (ROI) - Bottom Center
-    h, w = edges.shape
-    roi_mask = np.zeros_like(edges)
-    cv2.rectangle(roi_mask, (int(w*0.4), int(h*0.5)), (int(w*0.6), h), 255, -1)
-    masked_edges = cv2.bitwise_and(edges, roi_mask)
-
-    return masked_edges
-
-
 def draw_line(source, channel_index, y, color, dest):
     if source.ndim == 3:
         channel = source[:, :, channel_index]
@@ -77,147 +56,6 @@ def draw_line(source, channel_index, y, color, dest):
         cv2.line(dest, (lx, dy - ly), (x, dy - curr), color, 2)
         lx = x
         ly = curr
-
-
-def detect_by_color_lab(frame):
-    # image = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
-    lab = cv2.cvtColor(frame, cv2.COLOR_BGR2LAB)
-
-    # channel = lab[:, :, 0] # L
-
-    # mask = cv2.inRange(channel, 140, 160)
-    # result = cv2.bitwise_and(frame, frame, mask=mask)
-
-    # rgb = cv2.cvtColor(mask, cv2.COLOR_GRAY2BGR)
-
-
-    lu, au, bu = cv2.split(lab)     # uint8
-    aS = au.astype(np.int16) - 128
-    bS = bu.astype(np.int16) - 128
-    ab_diff = np.abs(aS - bS)
-    ab_diff_output = ab_diff.astype(np.uint8)
-    # result = cv2.cvtColor(ab_diff_output, cv2.COLOR_GRAY2BGR)
-
-    # # L, a, b filter
-    # lower_lab = np.array([128, 125, 125])
-    # upper_lab = np.array([255, 131, 131])
-    # mask = cv2.inRange(lab, lower_lab, upper_lab)
-    # result = cv2.bitwise_and(frame, frame, mask=mask)
-
-    # L filter
-    mask = cv2.inRange(lu, 128, 170)
-    result = cv2.bitwise_and(frame, frame, mask=mask)
-    # a-b filter
-    mask = cv2.inRange(ab_diff_output, 0, 4)
-    result = cv2.bitwise_and(result, result, mask=mask)
-
-    draw_line(ab_diff_output, 0, -1, (0, 255, 255), result)
-    draw_line(lab, 0, -1, (0, 0, 255), result)
-    # draw_line(lab, 1, -1, (0, 255, 255), result)
-    # draw_line(lab, 2, -1, (255, 0, 255), result)
-
-    return result
-
-def detect_by_color_hsv(frame):
-    hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
-
-    # Define 'Gray' range: Low saturation, mid-to-high value
-    # Hue doesn't matter much for gray, so we take the full range (0-180)
-    lower_gray = np.array([0, 0, 50])
-    upper_gray = np.array([180, 50, 200])
-
-    mask = cv2.inRange(hsv, lower_gray, upper_gray)
-
-    # Cleanup noise with Morphological Opening (Erosion followed by Dilation)
-    kernel = np.ones((5,5), np.uint8)
-    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
-
-    return mask
-
-
-def detect_hough_lines(frame):
-    # Start with the edge detection from method 1
-    edges = detect_edges_sobel_canny(frame)
-
-    # Probabilistic Hough Transform
-    # rho=1, theta=pi/180, threshold=50, minLineLength=100, maxLineGap=10
-    lines = cv2.HoughLinesP(edges, 1, np.pi/180, 50,
-                            minLineLength=100, maxLineGap=20)
-
-    line_img = np.zeros_like(frame)
-    if lines is not None:
-        for line in lines:
-            x1, y1, x2, y2 = line[0]
-            # Calculate angle: We only want vertical lines (approx 90 degrees)
-            angle = np.abs(np.arctan2(y2 - y1, x2 - x1) * 180 / np.pi)
-
-            if 70 < angle < 110: # Vertical tolerance
-                cv2.line(line_img, (x1, y1), (x2, y2), (0, 255, 0), 2)
-
-    return line_img
-
-
-class RodRemover:
-    def __init__(self, alpha=0.8, inpaint_radius=3):
-        self.alpha = alpha  # Persistence of the mask (0.0 to 1.0)
-        self.inpaint_radius = inpaint_radius
-        self.running_mask = None
-
-    def get_rod_mask(self, frame):
-        h, w = frame.shape[:2]
-        # 1. Convert to HSV for robust color segmentation
-        hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
-
-        # Define 'Neutral Gray' (Low saturation, specific value range)
-        lower_gray = np.array([0, 0, 40])
-        upper_gray = np.array([180, 60, 200])
-        mask = cv2.inRange(hsv, lower_gray, upper_gray)
-
-        # 2. Focus on the Bottom/Center ROI (where the rod starts)
-        roi_mask = np.zeros_like(mask)
-        # Search the bottom 70% of the frame
-        cv2.rectangle(roi_mask, (0, int(h * 0.3)), (w, h), 255, -1)
-        mask = cv2.bitwise_and(mask, roi_mask)
-
-        # 3. Clean up noise and link the 'flexing' parts
-        kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (5, 15))
-        mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
-
-        # 4. Contour Filter: Find the rod by its verticality
-        contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        final_mask = np.zeros_like(mask)
-
-        for cnt in contours:
-            x, y, w_c, h_c = cv2.boundingRect(cnt)
-            aspect_ratio = h_c / float(w_c)
-            # Filter for tall, thin objects that are near the bottom
-            if aspect_ratio > 2.5 and (y + h_c) > (h * 0.8):
-                cv2.drawContours(final_mask, [cnt], -1, 255, -1)
-
-        return final_mask
-
-    def process_frame(self, frame):
-        current_mask = self.get_rod_mask(frame)
-
-        # 5. Temporal Smoothing (The 'Running Mask')
-        if self.running_mask is None:
-            self.running_mask = current_mask.astype(float)
-        else:
-            # Blend the current detection with previous history
-            cv2.accumulateWeighted(current_mask, self.running_mask, 1.0 - self.alpha)
-
-        # Threshold the blended mask to get a solid binary area for inpainting
-        _, binary_mask = cv2.threshold(self.running_mask.astype(np.uint8), 50, 255, cv2.THRESH_BINARY)
-
-        # 6. Dilate slightly to ensure we cover the 'glow' or edges of the rod
-        dilate_kernel = np.ones((5, 5), np.uint8)
-        binary_mask = cv2.dilate(binary_mask, dilate_kernel, iterations=2)
-
-        # 7. Inpaint: Fill the hole using surrounding textures
-        # cv2.INPAINT_TELEA is generally faster for real-time video
-        result = cv2.inpaint(frame, binary_mask, self.inpaint_radius, cv2.INPAINT_TELEA)
-
-        return result, binary_mask
 
 
 class DetectorBase:
@@ -245,32 +83,6 @@ class DetectorBase:
         return frame
 
 
-class Detector1(DetectorBase):
-    def __init__(self):
-        super().__init__()
-
-    def filter(self, frame):
-        lab = cv2.cvtColor(frame, cv2.COLOR_BGR2LAB)
-
-        lu, au, bu = cv2.split(lab)     # uint8
-        aS = au.astype(np.int16) - 128
-        bS = bu.astype(np.int16) - 128
-        ab_diff = np.abs(aS - bS)
-        ab_diff_output = ab_diff.astype(np.uint8)
-
-        # L filter
-        mask = cv2.inRange(lu, 128, 180)
-        result = cv2.bitwise_and(frame, frame, mask=mask)
-        # a-b filter
-        mask = cv2.inRange(ab_diff_output, 0, 4)
-        result = cv2.bitwise_and(result, result, mask=mask)
-
-        draw_line(ab_diff_output, 0, -1, (0, 255, 255), self.overlay)
-        draw_line(lab, 0, -1, (0, 0, 255), self.overlay)
-
-        return result
-
-
 class Detector2(DetectorBase):
     def __init__(self):
         super().__init__()
@@ -287,13 +99,11 @@ class Detector2(DetectorBase):
         self.rod_delta_px = (self.rod_width_px - rod_delta_px, self.rod_width_px + rod_delta_px)
         print("Rod Width PX: ", self.rod_delta_px)
 
-    def cv_opencv_optimized_unused(self, sample):
-        # Coefficient of Variation (CV)
-        # Standard CV calculation using OpenCV's optimized core
-        mu, sigma = cv2.meanStdDev(sample)
-        mu_val = mu[0][0]
-        sigma_val = sigma[0][0]
-        return sigma_val / mu_val if mu_val > 0 else 0.0
+    def y_np_scalar(self, np_scalar):
+        return np.clip(np_scalar * 1000, a_min=None, a_max=255).item()
+
+    def y_np_vector(self, np_vect):
+        return np.clip(np_vect * 1000, a_min=None, a_max=255)
 
     def get_cv_vectorized(self, strip):
         """
@@ -314,76 +124,9 @@ class Detector2(DetectorBase):
 
         return cv_array
 
-    def detect_rod_prominence(self, cv_vector, center_weight=2.5):
-        """
-        Finds the rod by looking for the most prominent 'valley'
-        in the Coefficient of Variation signal.
-        """
-        # 1. Invert the signal: Low CV (rod) becomes a high peak
-        inverted_cv = -cv_vector
-
-        # 2. Find peaks based on Prominence
-        # We don't use a hard 'height' threshold; we let prominence do the work.
-        # width=(10, 50) allows for some blurring/flexing around the 30px target.
-        peaks, props = find_peaks(
-            inverted_cv,
-            prominence=0.10, # Minimum 'depth' of the valley to be considered
-            width=self.rod_delta_px,    # Looking for our ~30px rod
-            rel_height=0.5     # Calculate width at 50% of the prominence
-        )
-
-        if len(peaks) == 0:
-            return None
-
-        img_center = len(cv_vector) / 2
-        best_candidate = None
-        max_score = -1.0
-
-        scores = []
-        for i in range(len(peaks)):
-            idx = peaks[i]
-            prom = props['prominences'][i]
-            width = props['widths'][i]
-
-            # 3. Scoring: Combine Prominence and Center-Weighting
-            # Distance penalty (0.0 at center, increasing to ~0.7 at edges)
-            dist_factor = 1.0 / (1.0 + (abs(idx - img_center) / img_center) * center_weight)
-
-            # Total score: How 'valley-like' it is * How centered it is
-            score = prom * dist_factor
-
-            left_px = int(props['left_ips'][i])
-            right_px = int(props['right_ips'][i])
-
-            # Draw segment for debug
-            y = self.height - GRAPH_Y_OFFSET - min(255, int(100 * score))
-            cv2.line(self.overlay, (left_px, y), (right_px, y), (0, 0, 255), 2)
-            scores.append(score)
-
-            if score > max_score:
-                max_score = score
-                best_candidate = {
-                    'center': idx,
-                    'width': width,
-                    'prominence': prom,
-                    'score': score,
-                    'boundaries': (left_px, right_px)
-                }
-
-            print(scores)
-        return best_candidate
-
-    def draw_peaks(self, peaks, threshold_y, color_threshold, color_peaks, dest):
+    def draw_threshold(self, threshold_y, color_threshold, dest):
         y = self.height - int(threshold_y) - GRAPH_Y_OFFSET
-
-        w2 = self.rod_width_px // 2
-
         cv2.line(dest, (0, y), (self.width, y), color_threshold, 1)
-        y -= 4
-
-        for p in peaks:
-            cv2.line(dest, (p - w2, y), (p + w2, y), color_peaks, 2)
-            y -= 2
 
 
     def filter(self, frame):
@@ -395,28 +138,19 @@ class Detector2(DetectorBase):
         cv_lu = self.get_cv_vectorized(lu[-self.num_bottom_rows_cv:, :])
 
         # Smooth the CV vector
-        cv_lu = np.convolve(cv_lu, np.ones(5)/5, mode='same')
+        window = 5
+        cv_lu = np.convolve(cv_lu, np.ones(window)/window, mode='same')
 
         # # Adaptive thresholding
-        # # threshold = np.percentile(cv_lu, 50)
+        threshold = np.percentile(cv_lu, 50)
         # threshold = 0.1
+        self.draw_threshold(self.y_np_scalar(threshold), (0, 255, 0), self.overlay)
 
         # print(f"CVs: min: {np.min(cv_lu):.3f}, mean: {np.mean(cv_lu):.3f}, max: {np.max(cv_lu):.3f}, threshold: {threshold:.3f}")
 
-        # cv_lu = np.clip(cv_lu, a_min=None, a_max=threshold)
-        # # Peak detection with width constraints
-        # peaks, _ = find_peaks(
-        #     -cv_lu, # Invert for "valleys"
-        #     width=self.rod_delta_px,
-        #     # prominence=0.05
-        #     height=-threshold,  # Only valleys deeper than -threshold
-        # )
-        # self.draw_peaks(peaks, np.clip(threshold * 1000, a_min=None, a_max=255).item(), (0, 255, 0), (0, 0, 255), self.overlay)
+        # self.detect_rod_prominence(cv_lu)
 
-        self.detect_rod_prominence(cv_lu)
-
-        cv_disp_lu_1d = np.clip(cv_lu * 1000, a_min=None, a_max=255)
-        draw_line(cv_disp_lu_1d, 0, -1, (0, 255, 255), self.overlay)
+        draw_line(self.y_np_vector(cv_lu), 0, -1, (0, 255, 255), self.overlay)
 
         return frame
 
