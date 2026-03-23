@@ -209,7 +209,7 @@ class Detector2(DetectorBase):
         # 2. Find peaks based on Prominence
         # We don't use a hard 'height' threshold; we let prominence do the work.
         # width=(10, 50) allows for some blurring/flexing around the 30px target.
-        peaks, props = find_peaks(
+        peaks, props = scipy.signal.find_peaks(
             inverted_cv,
             prominence=0.10, # Minimum 'depth' of the valley to be considered
             width=self.rod_delta_px,    # Looking for our ~30px rod

@@ -14,7 +14,7 @@ try:
     import cv2
     import numpy as np
     import imutils
-    from scipy.signal import find_peaks
+    import scipy
     from flask import Flask, render_template, Response, request, jsonify
 except ModuleNotFoundError as e:
     print(f"ERROR: Missing library. {e}")
@@ -32,8 +32,8 @@ FPS = 30
 FPS_MS = 1000//FPS
 GRAPH_Y_OFFSET = 10
 NUM_BOTTOM_ROWS_CV_PCT = 20/720
-ROD_WIDTH = 30/1280
-ROD_WIDTH_DELTA = 10/1280
+ROD_WIDTH = 35/1280
+ROD_WIDTH_DELTA = 5/1280
 
 def draw_line(source, channel_index, y, color, dest):
     if source.ndim == 3:
@@ -86,6 +86,8 @@ class DetectorBase:
 class Detector2(DetectorBase):
     def __init__(self):
         super().__init__()
+        self.last_cv_lu = None
+        self.last_threshold = None
 
     def init_size(self, width, height):
         super().init_size(width, height)
@@ -124,6 +126,54 @@ class Detector2(DetectorBase):
 
         return cv_array
 
+    def find_rod_valleys(self, cv_under_threshold, min_width, max_width, center_weight=2.0):
+        """
+        Finds the rod by searching for low-variance valleys in a 1D signal.
+        """
+        img_center = cv_under_threshold.size / 2
+
+        # 2. Group contiguous 'valley' pixels
+        # labels is an array where each valley is numbered 1, 2, 3...
+        labels, num_features = scipy.ndimage.label(cv_under_threshold)
+
+        candidates = []
+
+        y = self.height - GRAPH_Y_OFFSET
+
+        for i in range(1, num_features + 1):
+            indices = np.where(labels == i)[0]
+            width = len(indices)
+
+            # 3. Apply Width Constraints
+            if min_width <= width <= max_width:
+                midpoint = (indices[0] + indices[-1]) / 2
+
+                # 4. Calculate Center Score
+                # Lower distance to center = Higher score
+                dist_to_center = abs(midpoint - img_center)
+
+                # Priority score: inversely proportional to distance
+                score = 1.0 / (1.0 + (dist_to_center / img_center) * center_weight)
+
+                left_px = indices[0]
+                right_px = indices[-1]
+                candidates.append({
+                    'center': midpoint,
+                    'width': width,
+                    'score': score,
+                    'indices': (left_px, right_px)
+                })
+
+                cv2.line(self.overlay, (left_px, y), (right_px, y), (255, 0, 0), 2)
+                y -= 2
+
+        # 5. Return the candidate with the highest score
+        if not candidates:
+            return None
+
+        best_candidate = max(candidates, key=lambda x: x['score'])
+        return best_candidate
+
     def draw_threshold(self, threshold_y, color_threshold, dest):
         y = self.height - int(threshold_y) - GRAPH_Y_OFFSET
         cv2.line(dest, (0, y), (self.width, y), color_threshold, 1)
@@ -141,8 +191,16 @@ class Detector2(DetectorBase):
         window = 5
         cv_lu = np.convolve(cv_lu, np.ones(window)/window, mode='same')
 
+        if self.last_cv_lu is not None:
+            cv_lu = cv_lu * 0.75 + self.last_cv_lu * 0.25
+        self.last_cv_lu = cv_lu
+        draw_line(self.y_np_vector(cv_lu), 0, -1, (0, 255, 255), self.overlay)
+
         # # Adaptive thresholding
         threshold = np.percentile(cv_lu, 50)
+        if self.last_threshold is not None:
+            threshold = threshold * 0.75 + self.last_threshold * 0.25
+        self.last_threshold = threshold
         # threshold = 0.1
         self.draw_threshold(self.y_np_scalar(threshold), (0, 255, 0), self.overlay)
 
@@ -150,7 +208,10 @@ class Detector2(DetectorBase):
 
         # self.detect_rod_prominence(cv_lu)
 
-        draw_line(self.y_np_vector(cv_lu), 0, -1, (0, 255, 255), self.overlay)
+        cv_under_threshold = cv_lu < threshold
+        draw_line(cv_under_threshold * 255, 0, -1, (0, 0, 255), self.overlay)
+
+        self.find_rod_valleys(cv_under_threshold, self.rod_delta_px[0], self.rod_delta_px[1])
 
         return frame
 
