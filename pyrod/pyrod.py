@@ -33,7 +33,7 @@ FPS_MS = 1000//FPS
 GRAPH_Y_OFFSET = 10
 NUM_BOTTOM_ROWS_CV_PCT = 20/720
 ROD_WIDTH = 35/1280
-ROD_WIDTH_DELTA = 5/1280
+ROD_WIDTH_DELTA = 10/1280
 
 def draw_line(source, channel_index, y, color, dest):
     if source.ndim == 3:
@@ -88,6 +88,7 @@ class Detector2(DetectorBase):
         super().__init__()
         self.last_cv_lu = None
         self.last_threshold = None
+        self.current_rod = None
 
     def init_size(self, width, height):
         super().init_size(width, height)
@@ -100,6 +101,9 @@ class Detector2(DetectorBase):
         rod_delta_px = int(ROD_WIDTH_DELTA * width)
         self.rod_delta_px = (self.rod_width_px - rod_delta_px, self.rod_width_px + rod_delta_px)
         print("Rod Width PX: ", self.rod_delta_px)
+
+    def weight(self, a, b):
+        return a * 0.75 + b * 0.25
 
     def y_np_scalar(self, np_scalar):
         return np.clip(np_scalar * 1000, a_min=None, a_max=255).item()
@@ -155,24 +159,61 @@ class Detector2(DetectorBase):
                 # Priority score: inversely proportional to distance
                 score = 1.0 / (1.0 + (dist_to_center / img_center) * center_weight)
 
-                left_px = indices[0]
-                right_px = indices[-1]
+                left_px = indices[0].item()
+                right_px = indices[-1].item()
                 candidates.append({
-                    'center': midpoint,
-                    'width': width,
-                    'score': score,
-                    'indices': (left_px, right_px)
+                    "center": midpoint.item(),
+                    "width": width,
+                    "score": score.item(),
+                    "indices": (left_px, right_px)
                 })
 
-                cv2.line(self.overlay, (left_px, y), (right_px, y), (255, 0, 0), 2)
+                cv2.line(self.overlay, (left_px, y), (right_px, y), (255, 0, 0), 3)
                 y -= 2
 
         # 5. Return the candidate with the highest score
         if not candidates:
             return None
 
-        best_candidate = max(candidates, key=lambda x: x['score'])
+        best_candidate = max(candidates, key=lambda x: x["score"])
         return best_candidate
+
+    def merge_rod(self, new_rod):
+        if new_rod is None:
+            return self.current_rod
+        if self.current_rod is None:
+            self.current_rod = new_rod
+        else:
+            old = self.current_rod
+            new_center = new_rod["center"]
+            old_center = old["center"]
+
+            # Ignore new rod if it has move by more than 2 rod widths
+            delta_center = abs(new_center - old_center)
+            delta_threshold = 1 * self.rod_width_px
+            if delta_center < delta_threshold:
+                new_indices = new_rod["indices"]
+                old_indices = old["indices"]
+                new_rod = {
+                    "center": self.weight(new_center, old_center),
+                    "width": self.weight(new_rod["width"], old["width"]),
+                    "score": self.weight(new_rod["score"], old["score"]),
+                    "indices": (self.weight(new_indices[0], old_indices[0]),
+                                self.weight(new_indices[1], old_indices[1]))
+                }
+                self.current_rod = new_rod
+                print("@@ delta", delta_center, "<", delta_threshold, " @@ ", old, " >>> ", self.current_rod)
+            else:
+                print("@@ delta", delta_center, ">=", delta_threshold)
+        return self.current_rod
+
+    def draw_rod(self, rod_dict):
+        indices = rod_dict["indices"]
+        left_px = int(indices[0])
+        right_px = int(indices[1])
+        y1 = self.height - GRAPH_Y_OFFSET
+        y2 = y1 - 128
+        cv2.rectangle(self.overlay, (left_px, y1), (right_px, y2), (0, 255, 0), 4)
 
     def draw_threshold(self, threshold_y, color_threshold, dest):
         y = self.height - int(threshold_y) - GRAPH_Y_OFFSET
@@ -189,17 +230,17 @@ class Detector2(DetectorBase):
 
         # Smooth the CV vector
         window = 5
-        cv_lu = np.convolve(cv_lu, np.ones(window)/window, mode='same')
+        cv_lu = np.convolve(cv_lu, np.ones(window)/window, mode="same")
 
         if self.last_cv_lu is not None:
-            cv_lu = cv_lu * 0.75 + self.last_cv_lu * 0.25
+            cv_lu = self.weight(cv_lu, self.last_cv_lu)
         self.last_cv_lu = cv_lu
         draw_line(self.y_np_vector(cv_lu), 0, -1, (0, 255, 255), self.overlay)
 
         # # Adaptive thresholding
-        threshold = np.percentile(cv_lu, 50)
+        threshold = np.percentile(cv_lu, 40)
         if self.last_threshold is not None:
-            threshold = threshold * 0.75 + self.last_threshold * 0.25
+            threshold = self.weight(threshold, self.last_threshold)
         self.last_threshold = threshold
         # threshold = 0.1
         self.draw_threshold(self.y_np_scalar(threshold), (0, 255, 0), self.overlay)
@@ -211,7 +252,9 @@ class Detector2(DetectorBase):
         cv_under_threshold = cv_lu < threshold
         draw_line(cv_under_threshold * 255, 0, -1, (0, 0, 255), self.overlay)
 
-        self.find_rod_valleys(cv_under_threshold, self.rod_delta_px[0], self.rod_delta_px[1])
+        new_rod = self.find_rod_valleys(cv_under_threshold, self.rod_delta_px[0], self.rod_delta_px[1])
+        self.merge_rod(new_rod)
+        self.draw_rod(self.current_rod)
 
         return frame
 
