@@ -14,10 +14,11 @@ try:
     import cv2
     import numpy as np
     import imutils
+    from scipy.signal import find_peaks
     from flask import Flask, render_template, Response, request, jsonify
 except ModuleNotFoundError as e:
     print(f"ERROR: Missing library. {e}")
-    print( "To fix: $ pip install opencv-python numpy imutils flask")
+    print( "To fix: $ pip install opencv-python numpy scipy imutils flask")
     print(f"or    : $ python {sys.argv[0]}")
     exit(1)
 
@@ -29,7 +30,10 @@ VIDEOS = [
 
 FPS = 30
 FPS_MS = 1000//FPS
-
+BLUR_SZ_PCT = 21/720
+NUM_BOTTOM_ROWS_CV_PCT = 20/720
+ROD_WIDTH = 35/1280
+ROD_WIDTH_DELTA = 5/1280
 
 def detect_edges_sobel_canny(frame):
     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
@@ -53,7 +57,6 @@ def detect_edges_sobel_canny(frame):
 
 
 def draw_line(source, channel_index, y, color, dest):
-    
     if source.ndim == 3:
         channel = source[:, :, channel_index]
         cvalue = lambda x: int(channel[y, x])
@@ -222,6 +225,10 @@ class DetectorBase:
         # Overlay is (B,G,R)
         self.overlay = None
 
+    def init_size(self, width, height):
+        self.width = width
+        self.height = height
+
     def init_overlay(self, frame):
         if self.overlay is None:
             self.overlay = np.zeros_like(frame)
@@ -240,7 +247,7 @@ class DetectorBase:
 
 class Detector1(DetectorBase):
     def __init__(self):
-        DetectorBase.__init__(self)
+        super().__init__()
 
     def filter(self, frame):
         lab = cv2.cvtColor(frame, cv2.COLOR_BGR2LAB)
@@ -266,9 +273,24 @@ class Detector1(DetectorBase):
 
 class Detector2(DetectorBase):
     def __init__(self):
-        DetectorBase.__init__(self)
+        super().__init__()
 
-    def cv_opencv_optimized(self, sample):
+    def init_size(self, width, height):
+        super().init_size(width, height)
+        # Blur kernel size. Must always be odd and at least 3x3.
+        self.blur_sz = max(3, int(BLUR_SZ_PCT * height))
+        if self.blur_sz % 2 == 0:
+            self.blur_sz += 1
+        self.blur_sz = (self.blur_sz, self.blur_sz)
+        # Number of rows to scan at the bottom to get the vertical per-band CV
+        self.num_bottom_rows_cv = int(NUM_BOTTOM_ROWS_CV_PCT * height)
+        # Width, as a fraction of the screen width
+        self.rod_width_px = int(ROD_WIDTH * width)
+        rod_delta_px = int(ROD_WIDTH_DELTA * width)
+        self.rod_delta_px = (self.rod_width_px - rod_delta_px, self.rod_width_px + rod_delta_px)
+        print("Rod Width PX: ", self.rod_delta_px)
+
+    def cv_opencv_optimized_unused(self, sample):
         # Coefficient of Variation (CV)
         # Standard CV calculation using OpenCV's optimized core
         mu, sigma = cv2.meanStdDev(sample)
@@ -280,7 +302,7 @@ class Detector2(DetectorBase):
         """
         Coefficient of Variation (CV)
         Calculates CV for all columns in a strip simultaneously.
-        'strip' should be a (10, width) array.
+        'strip' should be a (self.num_bottom_rows_cv, width) array.
         """
         # Convert to float32 for math
         data = strip.astype(np.float32)
@@ -295,47 +317,35 @@ class Detector2(DetectorBase):
         
         return cv_array
 
-    def filter_old(self, frame):
-        lab = cv2.cvtColor(frame, cv2.COLOR_BGR2LAB)
+    def draw_peaks(self, peaks, y, color, dest):
+        y = self.height - int(y)
+        w2 = self.rod_width_px // 2
+        for p in peaks:
+            cv2.line(dest, (p - w2, y), (p + w2, y), color, 2)
 
-        lu, au, bu = cv2.split(lab)     # uint8
-
-        aS = au.astype(np.int16) - 128
-        bS = bu.astype(np.int16) - 128
-        ab_diff = np.abs(aS - bS)
-        ab_diff = ab_diff.astype(np.uint8)
-
-        # if False:
-        #     # 2. Extract the bottom 10 rows for all columns
-        #     # Shape will be (10, width)
-        #     bottom_strip = lu[-10:, :]
-        #     _, width = lu.shape
-        #     cv_results = np.zeros(width, dtype=np.float32)
-
-        #     for x in range(width):
-        #         # Extract the 10-pixel vertical sample for this column
-        #         column_sample = bottom_strip[:, x]
-        #         cv_results[x] = self.cv_opencv_optimized(column_sample)
-        # else:
-        cv_lu = self.get_cv_vectorized(lu[-10:, :])
-        cv_ab = self.get_cv_vectorized(ab_diff[-10:, :])
-
-        cv_disp_lu_1d = np.clip(cv_lu * 1000, a_min=None, a_max=255)
-        cv_disp_ab_1d = np.clip(cv_ab * 1000, a_min=None, a_max=255)
-        draw_line(cv_disp_lu_1d, 0, -1, (0, 255, 255), self.overlay)
-        draw_line(cv_disp_ab_1d, 0, -1, (255, 0, 255), self.overlay)
-
-        return frame
 
     def filter(self, frame):
         lab = cv2.cvtColor(frame, cv2.COLOR_BGR2LAB)
 
         # lu, au, bu = cv2.split(lab)     # uint8
         lu = lab[:, :, 0]
-        blur = cv2.GaussianBlur(lu, (21, 21), 0)  # kernel size
+        # Blur a bit to get rid of film grain/noise.
+        blur = cv2.GaussianBlur(lu, self.blur_sz, 0)  # kernel size
 
-        cv_lu = self.get_cv_vectorized(lu[-10:, :])
+        cv_lu = self.get_cv_vectorized(lu[-self.num_bottom_rows_cv:, :])
 
+        # Adaptive thresholding
+        threshold = np.percentile(cv_lu, 95)
+
+        # Peak detection with width constraints
+        peaks, _ = find_peaks(
+            -cv_lu, # Invert for "valleys"
+            width=self.rod_delta_px,
+            prominence=0.05
+        )
+        
+        self.draw_peaks(peaks, 255-np.clip(threshold * 1000, a_min=None, a_max=255).item(), (0, 0, 255), self.overlay)
+    
         cv_disp_lu_1d = np.clip(cv_lu * 1000, a_min=None, a_max=255)
         draw_line(cv_disp_lu_1d, 0, -1, (0, 255, 255), self.overlay)
 
@@ -414,6 +424,7 @@ class Main:
                 if init_once:
                     height, width = frame.shape[:2]
                     print(f"Video size: {width}x{height}")
+                    detector.init_size(width, height)
                     init_once = False
 
                 detector.init_overlay(frame)
@@ -429,6 +440,12 @@ class Main:
                 key = cv2.waitKey(FPS_MS) & 0xFF
                 if key == ord('q'):
                     break
+                elif key == ord(' '):
+                    while True:
+                        time.sleep(0.3) # 300ms
+                        key = cv2.waitKey(FPS_MS) & 0xFF
+                        if key == ord(' '):
+                            break
                 elif key == ord('o'):
                     self.view_org = not self.view_org
                 elif key == ord('s'):
