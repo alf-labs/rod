@@ -32,7 +32,7 @@ FPS = 30
 FPS_MS = 1000//FPS
 BLUR_SZ_PCT = 21/720
 NUM_BOTTOM_ROWS_CV_PCT = 20/720
-ROD_WIDTH = 35/1280
+ROD_WIDTH = 25/1280
 ROD_WIDTH_DELTA = 5/1280
 
 def detect_edges_sobel_canny(frame):
@@ -317,11 +317,17 @@ class Detector2(DetectorBase):
         
         return cv_array
 
-    def draw_peaks(self, peaks, y, color, dest):
-        y = self.height - int(y)
+    def draw_peaks(self, peaks, threshold_y, color_threshold, color_peaks, dest):
+        y = self.height - int(threshold_y)
+
         w2 = self.rod_width_px // 2
+
+        cv2.line(dest, (0, y), (self.width, y), color_threshold, 1)
+        y -= 4
+
         for p in peaks:
-            cv2.line(dest, (p - w2, y), (p + w2, y), color, 2)
+            cv2.line(dest, (p - w2, y), (p + w2, y), color_peaks, 2)
+            y -= 2
 
 
     def filter(self, frame):
@@ -335,17 +341,21 @@ class Detector2(DetectorBase):
         cv_lu = self.get_cv_vectorized(lu[-self.num_bottom_rows_cv:, :])
 
         # Adaptive thresholding
-        threshold = np.percentile(cv_lu, 95)
+        # threshold = np.percentile(cv_lu, 50)
+        threshold = 0.1
 
+        print(f"CVs: min: {np.min(cv_lu):.3f}, mean: {np.mean(cv_lu):.3f}, max: {np.max(cv_lu):.3f}, threshold: {threshold:.3f}")
+
+        cv_lu = np.clip(cv_lu, a_min=None, a_max=threshold)
         # Peak detection with width constraints
         peaks, _ = find_peaks(
             -cv_lu, # Invert for "valleys"
             width=self.rod_delta_px,
-            prominence=0.05
+            # prominence=0.05
+            height=-threshold,  # Only valleys deeper than -threshold
         )
         
-        self.draw_peaks(peaks, 255-np.clip(threshold * 1000, a_min=None, a_max=255).item(), (0, 0, 255), self.overlay)
-    
+        self.draw_peaks(peaks, np.clip(threshold * 1000, a_min=None, a_max=255).item(), (0, 255, 0), (0, 0, 255), self.overlay)    
         cv_disp_lu_1d = np.clip(cv_lu * 1000, a_min=None, a_max=255)
         draw_line(cv_disp_lu_1d, 0, -1, (0, 255, 255), self.overlay)
 
@@ -378,7 +388,7 @@ class Main:
     def print_fps(self, loop_s, dest):
         fps = 1/loop_s if loop_s > 0 else 0
         ms = int(loop_s * 1000)
-        text = f"{ms} ms, {fps:.2f} fps"
+        text = f"{self.mx:03d} x, {ms} ms, {fps:.2f} fps"
         z = self.zoom
         cv2.putText(dest, text,
             (10 * z, 30 * z),           # bottom-left coord
