@@ -30,9 +30,9 @@ VIDEOS = [
 
 FPS = 30
 FPS_MS = 1000//FPS
-BLUR_SZ_PCT = 21/720
+GRAPH_Y_OFFSET = 10
 NUM_BOTTOM_ROWS_CV_PCT = 20/720
-ROD_WIDTH = 25/1280
+ROD_WIDTH = 30/1280
 ROD_WIDTH_DELTA = 5/1280
 
 def detect_edges_sobel_canny(frame):
@@ -71,7 +71,7 @@ def draw_line(source, channel_index, y, color, dest):
 
     lx = 0
     ly = cvalue(0)
-    dy = h - 10
+    dy = h - GRAPH_Y_OFFSET
     for x in range(1, w):
         curr = cvalue(x)
         cv2.line(dest, (lx, dy - ly), (x, dy - curr), color, 2)
@@ -277,13 +277,10 @@ class Detector2(DetectorBase):
 
     def init_size(self, width, height):
         super().init_size(width, height)
-        # Blur kernel size. Must always be odd and at least 3x3.
-        self.blur_sz = max(3, int(BLUR_SZ_PCT * height))
-        if self.blur_sz % 2 == 0:
-            self.blur_sz += 1
-        self.blur_sz = (self.blur_sz, self.blur_sz)
+
         # Number of rows to scan at the bottom to get the vertical per-band CV
         self.num_bottom_rows_cv = int(NUM_BOTTOM_ROWS_CV_PCT * height)
+
         # Width, as a fraction of the screen width
         self.rod_width_px = int(ROD_WIDTH * width)
         rod_delta_px = int(ROD_WIDTH_DELTA * width)
@@ -318,7 +315,7 @@ class Detector2(DetectorBase):
         return cv_array
 
     def draw_peaks(self, peaks, threshold_y, color_threshold, color_peaks, dest):
-        y = self.height - int(threshold_y)
+        y = self.height - int(threshold_y) - GRAPH_Y_OFFSET
 
         w2 = self.rod_width_px // 2
 
@@ -335,8 +332,6 @@ class Detector2(DetectorBase):
 
         # lu, au, bu = cv2.split(lab)     # uint8
         lu = lab[:, :, 0]
-        # Blur a bit to get rid of film grain/noise.
-        blur = cv2.GaussianBlur(lu, self.blur_sz, 0)  # kernel size
 
         cv_lu = self.get_cv_vectorized(lu[-self.num_bottom_rows_cv:, :])
 
@@ -359,8 +354,7 @@ class Detector2(DetectorBase):
         cv_disp_lu_1d = np.clip(cv_lu * 1000, a_min=None, a_max=255)
         draw_line(cv_disp_lu_1d, 0, -1, (0, 255, 255), self.overlay)
 
-        rgb_result = cv2.cvtColor(blur, cv2.COLOR_GRAY2BGR)
-        return rgb_result
+        return frame
 
 
 class Main:
