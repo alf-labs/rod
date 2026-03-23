@@ -413,6 +413,7 @@ class Main:
         loop_s = 0
         init_once = True
         frame_count = 0
+        paused = False
 
         # detector = Detector1()
         detector = Detector2()
@@ -421,9 +422,10 @@ class Main:
         try:
             while cap.isOpened():
                 start_loop_s = time.perf_counter()
-                ret, frame = cap.read()
-                if not ret:
-                    break
+                if not paused:
+                    ret, frame = cap.read()
+                    if not ret:
+                        break
 
                 frame_count += 1
                 _skip_num = self.skip_num
@@ -451,11 +453,7 @@ class Main:
                 if key == ord('q'):
                     break
                 elif key == ord(' '):
-                    while True:
-                        time.sleep(0.3) # 300ms
-                        key = cv2.waitKey(FPS_MS) & 0xFF
-                        if key == ord(' '):
-                            break
+                    paused = not paused
                 elif key == ord('o'):
                     self.view_org = not self.view_org
                 elif key == ord('s'):
