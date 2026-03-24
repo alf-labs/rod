@@ -33,7 +33,7 @@ FPS_MS = 1000//FPS
 GRAPH_Y_OFFSET = 10
 NUM_BOTTOM_ROWS_CV_PCT = 20/720
 ROD_WIDTH = 35/1280
-ROD_W_RANGE = (25/1280, 60/1280)
+ROD_W_RANGE = (30/1280, 40/1280)
 
 def draw_line(source, channel_index, y, color, dest):
     if source.ndim == 3:
@@ -69,6 +69,10 @@ class Rod:
 
     def width(self):
         return self.right - self.left
+
+    def __repr__(self):
+        return f"Rod( {self.left:.3f} -> {self.right:.3f} ; width {self.width():.3f} ; score {self.score:.3f} )"
+
 
 
 class DetectorBase:
@@ -115,8 +119,8 @@ class Detector2(DetectorBase):
         self.rod_w_range_px = ( int(ROD_W_RANGE[0] * width), int(ROD_W_RANGE[1] * width) )
         print("Rod Width PX: ", self.rod_width_px, "in range", self.rod_w_range_px)
 
-    def weight(self, a, b):
-        return a * 0.75 + b * 0.25
+    def weight(self, a, b, first=0.75):
+        return a * first + b * (1 - first)
 
     def y_np_scalar(self, np_scalar):
         return np.clip(np_scalar * 1000, a_min=None, a_max=255).item()
@@ -173,7 +177,9 @@ class Detector2(DetectorBase):
         for i in range(1, num_features + 1):
             indices = np.where(labels == i)[0]
             width = len(indices)
-            midpoint = (indices[0] + indices[-1]) / 2
+            left_px = indices[0].item()
+            right_px = indices[-1].item()
+            midpoint = (left_px + right_px) / 2
 
             # Apply Width Constraints
             # yet check any segment overlapping the current rod
@@ -183,12 +189,17 @@ class Detector2(DetectorBase):
 
                 # Calculate Center Score
                 # Lower distance to center = smaller score -- we want the lowest score
-                score = abs(midpoint - score_center)
+                delta_center = midpoint - score_center
+                score = abs(delta_center)
                 # Score is also degraded by how much width differs from expected width
-                score += abs(width - rod_width) / 4
+                score += abs(width - rod_width) / 10
 
-                left_px = indices[0].item()
-                right_px = indices[-1].item()
+                if cond_middle:
+                    # We want to mostly use the old rod position, slightly shifted towards
+                    # the new midpoint; we're trying to keep the same width.
+                    left_px = int(self.weight(rod_left, rod_left + delta_center, 0.9))
+                    right_px = int(self.weight(rod_right, rod_right + delta_center, 0.9))
+
                 candidates.append( Rod(left_px, right_px, score) )
 
                 ys = int(y - min(score / 2, 255))
@@ -197,6 +208,7 @@ class Detector2(DetectorBase):
         # Find best match (lowest score)
         if not candidates:
             return None
+        print("@@ ", candidates)
         best_candidate = min(candidates, key=lambda x: x.score)
         return best_candidate
 
@@ -223,6 +235,7 @@ class Detector2(DetectorBase):
                 score=self.weight(new_rod.score, old.score)
             )
             self.current_rod = new_rod
+            print("@@ new rod:", new_rod)
             # print("@@ delta", delta_center, "<", delta_threshold, " @@ ", old, " >>> ", self.current_rod)
             # else:
             #     print("@@ delta", delta_center, ">=", delta_threshold)
