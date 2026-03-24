@@ -31,9 +31,9 @@ VIDEOS = [
 FPS = 30
 FPS_MS = 1000//FPS
 GRAPH_Y_OFFSET = 10
-NUM_BOTTOM_ROWS_CV_PCT = 20/720
+NUM_BOTTOM_ROWS_CV_PCT = 50/720
 ROD_WIDTH = 35/1280
-ROD_W_RANGE = (30/1280, 40/1280)
+ROD_W_RANGE = (25/1280, 40/1280)
 
 def draw_line(source, channel_index, y, color, dest):
     if source.ndim == 3:
@@ -107,6 +107,8 @@ class Detector2(DetectorBase):
         self.last_cv_lu = None
         self.last_threshold = None
         self.current_rod = None
+        self.clahe = cv2.createCLAHE(clipLimit=1.5, tileGridSize=(8, 8))
+
 
     def init_size(self, width, height):
         super().init_size(width, height)
@@ -119,8 +121,14 @@ class Detector2(DetectorBase):
         self.rod_w_range_px = ( int(ROD_W_RANGE[0] * width), int(ROD_W_RANGE[1] * width) )
         print("Rod Width PX: ", self.rod_width_px, "in range", self.rod_w_range_px)
 
-    def weight(self, a, b, first=0.75):
-        return a * first + b * (1 - first)
+    def weight(self, a, b, weight_a=0.75):
+        return a * weight_a + b * (1 - weight_a)
+
+    def weight_asymetric(self, a, b, weight_a_up=0.25, weight_a_down=0.75):
+        if b > a:   # going up
+            return a * weight_a_up + b * (1 - weight_a_up)
+        else:
+            return a * weight_a_down + b * (1 - weight_a_down)
 
     def y_np_scalar(self, np_scalar):
         return np.clip(np_scalar * 1000, a_min=None, a_max=255).item()
@@ -208,7 +216,7 @@ class Detector2(DetectorBase):
         # Find best match (lowest score)
         if not candidates:
             return None
-        print("@@ ", candidates)
+        # print("@@ ", self.last_threshold, " >> ", candidates)
         best_candidate = min(candidates, key=lambda x: x.score)
 
         # Ignore the best candidate if its score is drastically worse than the current one.
@@ -229,20 +237,20 @@ class Detector2(DetectorBase):
             new_center = new_rod.center()
             old_center = old.center()
 
-            # Ignore new rod if it has move by more than N rod widths
-            # For testing: we trigger a pause
-            delta_center = abs(new_center - old_center)
-            delta_threshold = 3 * self.rod_width_px
-            if delta_center > delta_threshold:
-                self.trigger_pause = True
+            # # Ignore new rod if it has moved by more than N rod widths
+            # # For testing: we trigger a pause
+            # delta_center = abs(new_center - old_center)
+            # delta_threshold = 3 * self.rod_width_px
+            # if delta_center > delta_threshold:
+            #     self.trigger_pause = True
 
             new_rod = Rod(
-                left=self.weight(new_rod.left, old.left),
-                right=self.weight(new_rod.right, old.right),
-                score=self.weight(new_rod.score, old.score)
+                left=self.weight(old.left, new_rod.left),
+                right=self.weight(old.right, new_rod.right),
+                score=self.weight(old.score, new_rod.score)
             )
             self.current_rod = new_rod
-            print("@@ new rod:", new_rod)
+            # print("@@ new rod:", new_rod)
             # print("@@ delta", delta_center, "<", delta_threshold, " @@ ", old, " >>> ", self.current_rod)
             # else:
             #     print("@@ delta", delta_center, ">=", delta_threshold)
@@ -259,6 +267,29 @@ class Detector2(DetectorBase):
         y = self.height - int(threshold_y) - GRAPH_Y_OFFSET
         cv2.line(dest, (0, y), (self.width, y), color_threshold, 1)
 
+    def extract_roi_for_cv(self, lu):
+        # Extract the N bottom rows
+        N=self.num_bottom_rows_cv
+        bottom_lu = lu[-N:, :].copy()
+
+        # Apply CLAHE to amplify local texture detail
+        # We use a slightly lower clipLimit to avoid amplifying sensor noise too much
+        lu_clahe = self.clahe.apply(bottom_lu)
+
+        # Apply Histogram Stretching (Min-Max Normalization)
+        # This stretches the resulting L channel to the full 0-255 range
+        bottom_lu = cv2.normalize(lu_clahe, None, alpha=0, beta=255, norm_type=cv2.NORM_MINMAX)
+
+        # zero the left and right areas we don't want to analyze
+        q = self.width // 4
+        bottom_lu[:, :q] = 0
+        bottom_lu[:, -q:] = 0
+
+        # for debugging, place the modified lu back into the original
+        lu[-N:, :] = bottom_lu
+
+        return bottom_lu
+
     def filter(self, frame):
         lab = cv2.cvtColor(frame, cv2.COLOR_BGR2LAB)
 
@@ -266,10 +297,8 @@ class Detector2(DetectorBase):
         lu = lab[:, :, 0]
 
         # Extract the N bottom rows and zero the left and right areas we don't want to analyze
-        bottom_lu = lu[-self.num_bottom_rows_cv:, :].copy()
-        q = self.width // 4
-        bottom_lu[:, :q] = 0
-        bottom_lu[:, -q:] = 0
+        bottom_lu = self.extract_roi_for_cv(lu)
+
         # Even though we only filter on the middle of the image, we keep a vector of self.width
         # for ease and consistency. Our images are not very large so it's not a big penalty.
         cv_lu = self.get_cv_vectorized(bottom_lu)
@@ -287,15 +316,15 @@ class Detector2(DetectorBase):
         epsilon = 1e-6
         cv_filtered = cv_lu[cv_lu > epsilon]
         if cv_filtered.size > 0:
-            threshold = np.percentile(cv_filtered, 40)
+            threshold = np.percentile(cv_filtered, self.rod_width_px)
         else:
             threshold = 0
 
         if self.last_threshold is not None:
-            threshold = self.weight(threshold, self.last_threshold)
+            threshold = self.weight_asymetric(self.last_threshold, threshold)
         self.last_threshold = threshold
-        # threshold = 0.1
         self.draw_threshold(self.y_np_scalar(threshold), (0, 255, 0), self.overlay)
+        print("@@ threshold: ", threshold)
 
         # print(f"CVs: min: {np.min(cv_lu):.3f}, mean: {np.mean(cv_lu):.3f}, max: {np.max(cv_lu):.3f}, threshold: {threshold:.3f}")
 
