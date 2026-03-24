@@ -130,11 +130,15 @@ class Detector2(DetectorBase):
 
         return cv_array
 
-    def find_rod_valleys(self, cv_under_threshold, min_width, max_width, center_weight=2.0):
+    def find_rod_valleys(self, cv_under_threshold, min_width, max_width):
         """
         Finds the rod by searching for low-variance valleys in a 1D signal.
         """
-        img_center = cv_under_threshold.size / 2
+        if self.current_rod is None:
+            score_center = cv_under_threshold.size / 2
+        else:
+            # TBD this needs to be adjusted if cv_under_threshold is smaller than screen width
+            score_center = self.current_rod["center"]
 
         # 2. Group contiguous 'valley' pixels
         # labels is an array where each valley is numbered 1, 2, 3...
@@ -153,11 +157,8 @@ class Detector2(DetectorBase):
                 midpoint = (indices[0] + indices[-1]) / 2
 
                 # 4. Calculate Center Score
-                # Lower distance to center = Higher score
-                dist_to_center = abs(midpoint - img_center)
-
-                # Priority score: inversely proportional to distance
-                score = 1.0 / (1.0 + (dist_to_center / img_center) * center_weight)
+                # Lower distance to center = smaller score -- we want the lowest score
+                score = abs(midpoint - score_center)
 
                 left_px = indices[0].item()
                 right_px = indices[-1].item()
@@ -175,7 +176,7 @@ class Detector2(DetectorBase):
         if not candidates:
             return None
 
-        best_candidate = max(candidates, key=lambda x: x["score"])
+        best_candidate = min(candidates, key=lambda x: x["score"])
         return best_candidate
 
     def merge_rod(self, new_rod):
@@ -191,23 +192,24 @@ class Detector2(DetectorBase):
             # Ignore new rod if it has move by more than 2 rod widths
             delta_center = abs(new_center - old_center)
             delta_threshold = 1 * self.rod_width_px
-            if delta_center < delta_threshold:
-                new_indices = new_rod["indices"]
-                old_indices = old["indices"]
-                new_rod = {
-                    "center": self.weight(new_center, old_center),
-                    "width": self.weight(new_rod["width"], old["width"]),
-                    "score": self.weight(new_rod["score"], old["score"]),
-                    "indices": (self.weight(new_indices[0], old_indices[0]),
-                                self.weight(new_indices[1], old_indices[1]))
-                }
-                self.current_rod = new_rod
-                print("@@ delta", delta_center, "<", delta_threshold, " @@ ", old, " >>> ", self.current_rod)
-            else:
-                print("@@ delta", delta_center, ">=", delta_threshold)
+            # if delta_center < delta_threshold:
+            new_indices = new_rod["indices"]
+            old_indices = old["indices"]
+            new_rod = {
+                "center": self.weight(new_center, old_center),
+                "width": self.weight(new_rod["width"], old["width"]),
+                "score": self.weight(new_rod["score"], old["score"]),
+                "indices": (self.weight(new_indices[0], old_indices[0]),
+                            self.weight(new_indices[1], old_indices[1]))
+            }
+            self.current_rod = new_rod
+            print("@@ delta", delta_center, "<", delta_threshold, " @@ ", old, " >>> ", self.current_rod)
+            # else:
+            #     print("@@ delta", delta_center, ">=", delta_threshold)
         return self.current_rod
 
     def draw_rod(self, rod_dict):
+        if rod_dict is None: return
         indices = rod_dict["indices"]
         left_px = int(indices[0])
         right_px = int(indices[1])
@@ -226,7 +228,14 @@ class Detector2(DetectorBase):
         # lu, au, bu = cv2.split(lab)     # uint8
         lu = lab[:, :, 0]
 
-        cv_lu = self.get_cv_vectorized(lu[-self.num_bottom_rows_cv:, :])
+        # Extract the N bottom rows and zero the left and right areas we don't want to analyze
+        bottom_lu = lu[-self.num_bottom_rows_cv:, :].copy()
+        q = self.width // 4
+        bottom_lu[:, :q] = 0
+        bottom_lu[:, -q:] = 0
+        # Even though we only filter on the middle of the image, we keep a vector of self.width
+        # for ease and consistency. Our images are not very large so it's not a big penalty.
+        cv_lu = self.get_cv_vectorized(bottom_lu)
 
         # Smooth the CV vector
         window = 5
@@ -238,7 +247,13 @@ class Detector2(DetectorBase):
         draw_line(self.y_np_vector(cv_lu), 0, -1, (0, 255, 255), self.overlay)
 
         # # Adaptive thresholding
-        threshold = np.percentile(cv_lu, 40)
+        epsilon = 1e-6
+        cv_filtered = cv_lu[cv_lu > epsilon]
+        if cv_filtered.size > 0:
+            threshold = np.percentile(cv_filtered, 40)
+        else:
+            threshold = 0
+
         if self.last_threshold is not None:
             threshold = self.weight(threshold, self.last_threshold)
         self.last_threshold = threshold
@@ -256,7 +271,7 @@ class Detector2(DetectorBase):
         self.merge_rod(new_rod)
         self.draw_rod(self.current_rod)
 
-        return frame
+        return cv2.cvtColor(lu, cv2.COLOR_GRAY2BGR)
 
 
 class Main:
