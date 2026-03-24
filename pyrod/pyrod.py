@@ -33,7 +33,7 @@ FPS_MS = 1000//FPS
 GRAPH_Y_OFFSET = 10
 NUM_BOTTOM_ROWS_CV_PCT = 20/720
 ROD_WIDTH = 35/1280
-ROD_WIDTH_DELTA = 10/1280
+ROD_W_RANGE = (25/1280, 60/1280)
 
 def draw_line(source, channel_index, y, color, dest):
     if source.ndim == 3:
@@ -62,6 +62,7 @@ class DetectorBase:
     def __init__(self):
         # Overlay is (B,G,R)
         self.overlay = None
+        self.trigger_pause = False
 
     def init_size(self, width, height):
         self.width = width
@@ -98,9 +99,8 @@ class Detector2(DetectorBase):
 
         # Width, as a fraction of the screen width
         self.rod_width_px = int(ROD_WIDTH * width)
-        rod_delta_px = int(ROD_WIDTH_DELTA * width)
-        self.rod_delta_px = (self.rod_width_px - rod_delta_px, self.rod_width_px + rod_delta_px)
-        print("Rod Width PX: ", self.rod_delta_px)
+        self.rod_w_range_px = ( int(ROD_W_RANGE[0] * width), int(ROD_W_RANGE[1] * width) )
+        print("Rod Width PX: ", self.rod_width_px, "in range", self.rod_w_range_px)
 
     def weight(self, a, b):
         return a * 0.75 + b * 0.25
@@ -130,17 +130,20 @@ class Detector2(DetectorBase):
 
         return cv_array
 
-    def find_rod_valleys(self, cv_under_threshold, min_width, max_width):
+    def find_rod_valleys(self, cv_under_threshold):
         """
         Finds the rod by searching for low-variance valleys in a 1D signal.
         """
         if self.current_rod is None:
             score_center = cv_under_threshold.size / 2
+            rod_left = -1
+            rod_right = -1
         else:
             # TBD this needs to be adjusted if cv_under_threshold is smaller than screen width
             score_center = self.current_rod["center"]
+            rod_left, rod_right = self.current_rod["indices"]
 
-        # 2. Group contiguous 'valley' pixels
+        # Group contiguous 'valley' pixels
         # labels is an array where each valley is numbered 1, 2, 3...
         labels, num_features = scipy.ndimage.label(cv_under_threshold)
 
@@ -148,17 +151,27 @@ class Detector2(DetectorBase):
 
         y = self.height - GRAPH_Y_OFFSET
 
+        rod_width = self.rod_width_px
+        min_width = self.rod_w_range_px[0]
+        max_width = self.rod_w_range_px[1]
+
+
         for i in range(1, num_features + 1):
             indices = np.where(labels == i)[0]
             width = len(indices)
+            midpoint = (indices[0] + indices[-1]) / 2
 
-            # 3. Apply Width Constraints
-            if min_width <= width <= max_width:
-                midpoint = (indices[0] + indices[-1]) / 2
+            # Apply Width Constraints
+            # yet check any segment overlapping the current rod
+            cond_width = min_width <= width <= max_width
+            cond_middle = rod_left <= midpoint <= rod_right
+            if cond_width or cond_middle:
 
-                # 4. Calculate Center Score
+                # Calculate Center Score
                 # Lower distance to center = smaller score -- we want the lowest score
                 score = abs(midpoint - score_center)
+                # Score is also degraded by how much width differs from expected width
+                score += abs(width - rod_width) / 4
 
                 left_px = indices[0].item()
                 right_px = indices[-1].item()
@@ -169,13 +182,12 @@ class Detector2(DetectorBase):
                     "indices": (left_px, right_px)
                 })
 
-                cv2.line(self.overlay, (left_px, y), (right_px, y), (255, 0, 0), 3)
-                y -= 2
+                ys = int(y - min(score / 2, 255))
+                cv2.line(self.overlay, (left_px, ys), (right_px, ys), (255, 0, 0), 3)
 
-        # 5. Return the candidate with the highest score
+        # Find best match (lowest score)
         if not candidates:
             return None
-
         best_candidate = min(candidates, key=lambda x: x["score"])
         return best_candidate
 
@@ -189,10 +201,13 @@ class Detector2(DetectorBase):
             new_center = new_rod["center"]
             old_center = old["center"]
 
-            # Ignore new rod if it has move by more than 2 rod widths
+            # Ignore new rod if it has move by more than N rod widths
+            # For testing: we trigger a pause
             delta_center = abs(new_center - old_center)
-            delta_threshold = 1 * self.rod_width_px
-            # if delta_center < delta_threshold:
+            delta_threshold = 3 * self.rod_width_px
+            if delta_center > delta_threshold:
+                self.trigger_pause = True
+
             new_indices = new_rod["indices"]
             old_indices = old["indices"]
             new_rod = {
@@ -203,7 +218,7 @@ class Detector2(DetectorBase):
                             self.weight(new_indices[1], old_indices[1]))
             }
             self.current_rod = new_rod
-            print("@@ delta", delta_center, "<", delta_threshold, " @@ ", old, " >>> ", self.current_rod)
+            # print("@@ delta", delta_center, "<", delta_threshold, " @@ ", old, " >>> ", self.current_rod)
             # else:
             #     print("@@ delta", delta_center, ">=", delta_threshold)
         return self.current_rod
@@ -246,7 +261,7 @@ class Detector2(DetectorBase):
         self.last_cv_lu = cv_lu
         draw_line(self.y_np_vector(cv_lu), 0, -1, (0, 255, 255), self.overlay)
 
-        # # Adaptive thresholding
+        # Adaptive thresholding
         epsilon = 1e-6
         cv_filtered = cv_lu[cv_lu > epsilon]
         if cv_filtered.size > 0:
@@ -267,7 +282,7 @@ class Detector2(DetectorBase):
         cv_under_threshold = cv_lu < threshold
         draw_line(cv_under_threshold * 255, 0, -1, (0, 0, 255), self.overlay)
 
-        new_rod = self.find_rod_valleys(cv_under_threshold, self.rod_delta_px[0], self.rod_delta_px[1])
+        new_rod = self.find_rod_valleys(cv_under_threshold)
         self.merge_rod(new_rod)
         self.draw_rod(self.current_rod)
 
@@ -326,7 +341,6 @@ class Main:
         frame_count = 0
         paused = False
 
-        # detector = Detector1()
         detector = Detector2()
 
         cap = cv2.VideoCapture(VIDEOS[0])
@@ -363,6 +377,11 @@ class Main:
                     cv2.imshow(WINDOW_TITLE, detector.combine_overlay(frame))
                 else:
                     cv2.imshow(WINDOW_TITLE, detector.combine_overlay(result))
+
+                if detector.trigger_pause:
+                    print("@@ Detector triggered pause. Space to continue.")
+                    detector.trigger_pause = False
+                    paused = True
 
                 key = cv2.waitKey(FPS_MS) & 0xFF
                 if key == ord('q'):
