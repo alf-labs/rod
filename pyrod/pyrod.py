@@ -197,8 +197,8 @@ class Detector2(DetectorBase):
                 if cond_middle:
                     # We want to mostly use the old rod position, slightly shifted towards
                     # the new midpoint; we're trying to keep the same width.
-                    left_px = int(self.weight(rod_left, rod_left + delta_center, 0.9))
-                    right_px = int(self.weight(rod_right, rod_right + delta_center, 0.9))
+                    left_px = int(self.weight(rod_left, rod_left + delta_center))
+                    right_px = int(self.weight(rod_right, rod_right + delta_center))
 
                 candidates.append( Rod(left_px, right_px, score) )
 
@@ -210,11 +210,18 @@ class Detector2(DetectorBase):
             return None
         print("@@ ", candidates)
         best_candidate = min(candidates, key=lambda x: x.score)
+
+        # Ignore the best candidate if its score is drastically worse than the current one.
+        # Since the score is a number of pixels off the center of the current rod, we can
+        # compare the score delta to the rod width.
+        if self.current_rod is not None:
+            curr_score = self.current_rod.score
+            if best_candidate.score > curr_score + 2 * rod_width:
+                return None
+
         return best_candidate
 
     def merge_rod(self, new_rod):
-        if new_rod is None:
-            return self.current_rod
         if self.current_rod is None:
             self.current_rod = new_rod
         else:
@@ -242,7 +249,6 @@ class Detector2(DetectorBase):
         return self.current_rod
 
     def draw_rod(self, rod):
-        if rod is None: return
         left_px = int(rod.left)
         right_px = int(rod.right)
         y1 = self.height - GRAPH_Y_OFFSET
@@ -299,8 +305,9 @@ class Detector2(DetectorBase):
         draw_line(cv_under_threshold * 255, 0, -1, (0, 0, 255), self.overlay)
 
         new_rod = self.find_rod_valleys(cv_under_threshold)
-        self.merge_rod(new_rod)
-        self.draw_rod(self.current_rod)
+        if new_rod is not None:
+            self.merge_rod(new_rod)
+            self.draw_rod(self.current_rod)
 
         return cv2.cvtColor(lu, cv2.COLOR_GRAY2BGR)
 
