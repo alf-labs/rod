@@ -58,6 +58,19 @@ def draw_line(source, channel_index, y, color, dest):
         ly = curr
 
 
+class Rod:
+    def __init__(self, left, right, score):
+        self.left = left
+        self.right = right
+        self.score = score
+
+    def center(self):
+        return (self.left + self.right) / 2
+
+    def width(self):
+        return self.right - self.left
+
+
 class DetectorBase:
     def __init__(self):
         # Overlay is (B,G,R)
@@ -140,8 +153,9 @@ class Detector2(DetectorBase):
             rod_right = -1
         else:
             # TBD this needs to be adjusted if cv_under_threshold is smaller than screen width
-            score_center = self.current_rod["center"]
-            rod_left, rod_right = self.current_rod["indices"]
+            score_center = self.current_rod.center()
+            rod_left = self.current_rod.left
+            rod_right = self.current_rod.right
 
         # Group contiguous 'valley' pixels
         # labels is an array where each valley is numbered 1, 2, 3...
@@ -175,12 +189,7 @@ class Detector2(DetectorBase):
 
                 left_px = indices[0].item()
                 right_px = indices[-1].item()
-                candidates.append({
-                    "center": midpoint.item(),
-                    "width": width,
-                    "score": score.item(),
-                    "indices": (left_px, right_px)
-                })
+                candidates.append( Rod(left_px, right_px, score) )
 
                 ys = int(y - min(score / 2, 255))
                 cv2.line(self.overlay, (left_px, ys), (right_px, ys), (255, 0, 0), 3)
@@ -188,7 +197,7 @@ class Detector2(DetectorBase):
         # Find best match (lowest score)
         if not candidates:
             return None
-        best_candidate = min(candidates, key=lambda x: x["score"])
+        best_candidate = min(candidates, key=lambda x: x.score)
         return best_candidate
 
     def merge_rod(self, new_rod):
@@ -198,8 +207,8 @@ class Detector2(DetectorBase):
             self.current_rod = new_rod
         else:
             old = self.current_rod
-            new_center = new_rod["center"]
-            old_center = old["center"]
+            new_center = new_rod.center()
+            old_center = old.center()
 
             # Ignore new rod if it has move by more than N rod widths
             # For testing: we trigger a pause
@@ -208,26 +217,21 @@ class Detector2(DetectorBase):
             if delta_center > delta_threshold:
                 self.trigger_pause = True
 
-            new_indices = new_rod["indices"]
-            old_indices = old["indices"]
-            new_rod = {
-                "center": self.weight(new_center, old_center),
-                "width": self.weight(new_rod["width"], old["width"]),
-                "score": self.weight(new_rod["score"], old["score"]),
-                "indices": (self.weight(new_indices[0], old_indices[0]),
-                            self.weight(new_indices[1], old_indices[1]))
-            }
+            new_rod = Rod(
+                left=self.weight(new_rod.left, old.left),
+                right=self.weight(new_rod.right, old.right),
+                score=self.weight(new_rod.score, old.score)
+            )
             self.current_rod = new_rod
             # print("@@ delta", delta_center, "<", delta_threshold, " @@ ", old, " >>> ", self.current_rod)
             # else:
             #     print("@@ delta", delta_center, ">=", delta_threshold)
         return self.current_rod
 
-    def draw_rod(self, rod_dict):
-        if rod_dict is None: return
-        indices = rod_dict["indices"]
-        left_px = int(indices[0])
-        right_px = int(indices[1])
+    def draw_rod(self, rod):
+        if rod is None: return
+        left_px = int(rod.left)
+        right_px = int(rod.right)
         y1 = self.height - GRAPH_Y_OFFSET
         y2 = y1 - 128
         cv2.rectangle(self.overlay, (left_px, y1), (right_px, y2), (0, 255, 0), 4)
@@ -235,7 +239,6 @@ class Detector2(DetectorBase):
     def draw_threshold(self, threshold_y, color_threshold, dest):
         y = self.height - int(threshold_y) - GRAPH_Y_OFFSET
         cv2.line(dest, (0, y), (self.width, y), color_threshold, 1)
-
 
     def filter(self, frame):
         lab = cv2.cvtColor(frame, cv2.COLOR_BGR2LAB)
