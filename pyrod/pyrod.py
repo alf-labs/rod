@@ -130,8 +130,14 @@ class Detector2(DetectorBase):
         else:
             return a * weight_a_down + b * (1 - weight_a_down)
 
-    def y_np_scalar(self, np_scalar):
-        return np.clip(np_scalar * 1000, a_min=None, a_max=255).item()
+    def y_np_scalar(self, np_scalar, top=0):
+        if top > 0:
+            np_scalar -= top
+            np_scalar *= 1000
+            np_scalar += 255
+            return np.clip(np_scalar, a_min=None, a_max=255).item()
+        else:
+            return np.clip(np_scalar * 1000, a_min=None, a_max=255).item()
 
     def y_np_vector(self, np_vect):
         return np.clip(np_vect * 1000, a_min=None, a_max=255)
@@ -155,6 +161,93 @@ class Detector2(DetectorBase):
 
         return cv_array
 
+    def find_rod_peaks(self, cv_peaks):
+        if self.current_rod is None:
+            score_center = cv_peaks.size / 2
+            rod_left = -1
+            rod_right = -1
+        else:
+            score_center = self.current_rod.center()
+            rod_left = self.current_rod.left
+            rod_right = self.current_rod.right
+
+        peaks, props = scipy.signal.find_peaks(
+            cv_peaks,
+            prominence=0.50, # Minimum 'depth' of the valley to be considered
+            # width=self.rod_w_range_px,    # Looking for our ~30px rod
+            # rel_height=0.5     # Calculate width at 50% of the prominence
+        )
+        # print("@@ peaks", peaks, " // props", props)
+
+        candidates = []
+
+        y = self.height - GRAPH_Y_OFFSET
+
+        rod_width = self.rod_width_px
+        min_width = self.rod_w_range_px[0]
+        max_width = self.rod_w_range_px[1]
+
+        left_bases = props["left_bases"]
+        right_bases = props["right_bases"]
+        num_peaks = len(peaks)
+
+        for i in range(0, num_peaks):
+            left_px = left_bases[i]
+            right_px = right_bases[i]
+            peak = peaks[i]
+            peak_cv = cv_peaks[peak].item()
+            midpoint = (left_px + right_px) / 2
+            width = right_px - left_px
+
+            # candidates.append(
+            #     f"<peak {peak} = {peak_cv}, {left_px} < {midpoint} < {right_px}, w/ {width} >"
+            # )
+
+            # Apply Width Constraints
+            # yet check any peak overlapping the current rod
+            cond_width = min_width <= width <= max_width
+            cond_middle = rod_left <= peak <= rod_right
+            if cond_width or cond_middle:
+
+                # Calculate Center Score.
+                # Score starts with the peak's CV value, so we want the highest one.
+                # It is degraded (lowered) by the distance from the center,
+                # and further degraded by the absolute difference from the ideal width.
+                delta_center = peak - score_center
+                delta_width = width - rod_width
+                score = peak_cv - abs(delta_center) - abs(delta_width) / 100
+
+                # if cond_middle:
+                #     # We want to mostly use the old rod position, slightly shifted towards
+                #     # the new midpoint; we're trying to keep the same width.
+                #     left_px = int(self.weight(rod_left, rod_left + delta_center))
+                #     right_px = int(self.weight(rod_right, rod_right + delta_center))
+
+                candidates.append( Rod(left_px, right_px, score) )
+
+                # ys = int(y + max(0, min(score + 255 - 1, 255)))
+                ys = y - 255
+                y += 5
+                cv2.line(self.overlay, (left_px, ys), (right_px, ys), (255, 0, 0), 3)
+
+        # Find best match (highest score)
+        if not candidates:
+            return None
+        # print(candidates)
+        # print("@@ ", self.last_threshold, " >> ", candidates)
+        best_candidate = max(candidates, key=lambda x: x.score)
+
+        # Ignore the best candidate if its score is drastically worse than the current one.
+        # Since the score is a number of pixels off the center of the current rod, we can
+        # compare the score delta to the rod width.
+        if self.current_rod is not None:
+            curr_score = self.current_rod.score
+            if best_candidate.score < curr_score - 2 * rod_width:
+                return None
+
+        return best_candidate
+
+
     def find_rod_valleys(self, cv_under_threshold):
         """
         Finds the rod by searching for low-variance valleys in a 1D signal.
@@ -164,7 +257,6 @@ class Detector2(DetectorBase):
             rod_left = -1
             rod_right = -1
         else:
-            # TBD this needs to be adjusted if cv_under_threshold is smaller than screen width
             score_center = self.current_rod.center()
             rod_left = self.current_rod.left
             rod_right = self.current_rod.right
@@ -310,7 +402,7 @@ class Detector2(DetectorBase):
         if self.last_cv_lu is not None:
             cv_lu = self.weight(cv_lu, self.last_cv_lu)
         self.last_cv_lu = cv_lu
-        draw_line(self.y_np_vector(cv_lu), 0, -1, (0, 255, 255), self.overlay)
+        draw_line(self.y_np_vector(cv_lu), 0, -1, (0, 165, 255), self.overlay)
 
         # Adaptive thresholding
         epsilon = 1e-6
@@ -323,17 +415,20 @@ class Detector2(DetectorBase):
         if self.last_threshold is not None:
             threshold = self.weight_asymetric(self.last_threshold, threshold)
         self.last_threshold = threshold
-        self.draw_threshold(self.y_np_scalar(threshold), (0, 255, 0), self.overlay)
-        print("@@ threshold: ", threshold)
 
         # print(f"CVs: min: {np.min(cv_lu):.3f}, mean: {np.mean(cv_lu):.3f}, max: {np.max(cv_lu):.3f}, threshold: {threshold:.3f}")
 
         # self.detect_rod_prominence(cv_lu)
 
-        cv_under_threshold = cv_lu < threshold
-        draw_line(cv_under_threshold * 255, 0, -1, (0, 0, 255), self.overlay)
+        cv_mask = cv_lu < threshold
+        cv_peaks = (1 - cv_lu) * cv_mask
+        peak_threshold = 1 - threshold
+        draw_line(cv_peaks * 255, 0, -1, (0, 255, 255), self.overlay)
+        self.draw_threshold(self.y_np_scalar(peak_threshold, 1), (0, 255, 0), self.overlay)
+        # print("@@ peak_threshold: ", peak_threshold)
 
-        new_rod = self.find_rod_valleys(cv_under_threshold)
+        # new_rod = self.find_rod_valleys(cv_mask)
+        new_rod = self.find_rod_peaks(cv_peaks)
         if new_rod is not None:
             self.merge_rod(new_rod)
             self.draw_rod(self.current_rod)
