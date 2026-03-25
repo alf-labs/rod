@@ -182,6 +182,8 @@ class Detector2(DetectorBase):
         candidates = []
 
         y = self.height - GRAPH_Y_OFFSET
+        ys = y - 255
+        yt = ys
 
         rod_width = self.rod_width_px
         min_width = self.rod_w_range_px[0]
@@ -226,9 +228,17 @@ class Detector2(DetectorBase):
                 candidates.append( Rod(left_px, right_px, score) )
 
                 # ys = int(y + max(0, min(score + 255 - 1, 255)))
-                ys = y - 255
-                y += 5
+                ys += 5
                 cv2.line(self.overlay, (left_px, ys), (right_px, ys), (255, 0, 0), 3)
+                text = f"{score:4.3f}"
+                yt -= 5
+                cv2.putText(self.overlay, text,
+                    (left_px, yt),           # bottom-left coord
+                    cv2.FONT_HERSHEY_DUPLEX,    # font
+                    .75,                          # font scale
+                    (255, 0, 0),              # color
+                    1 )                         # line thickness
+
 
         # Find best match (highest score)
         if not candidates:
