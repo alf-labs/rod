@@ -29,7 +29,7 @@ IN_VIDEOS = [
     "../samples/rod1_rear_randall_up_2025-03-23.mp4",
 ]
 
-OUT_VIDEO_FILE_PATH = "output_%s.mp4" % time.strftime("%Y-%m-%d_%H-%M-%S")
+OUT_VIDEO_FILE_PATH = "outputIDX_%s.mp4" % time.strftime("%Y-%m-%d_%H-%M-%S")
 
 GRAPH_Y_OFFSET = 10
 NUM_BOTTOM_ROWS_CV_PCT = 100/720
@@ -106,7 +106,7 @@ class Detector2(DetectorBase):
     def __init__(self):
         super().__init__()
         self.last_cv_lu = None
-        self.last_threshold = None
+        self.last_threshold = 0
         self.current_rod = None
         self.clahe = cv2.createCLAHE(clipLimit=1.5, tileGridSize=(8, 8))
 
@@ -428,10 +428,19 @@ class Main:
         print("@@ Run")
 
         parser = argparse.ArgumentParser(description="PyRod")
-        parser.add_argument("-i", "--input", default=IN_VIDEOS[0], help="Input video")
+        parser.add_argument("-i", "--input", default="0", help="Input video")
         parser.add_argument("-o", "--output", default=OUT_VIDEO_FILE_PATH, help="Output video")
         parser.add_argument("-n", "--no-video", action="store_true", help="Skip Video Output")
         args = parser.parse_args()
+
+        input_idx = "_"
+        input_path = args.input
+        if input_path.isdigit():
+            input_idx = int(input_path)
+            input_path = IN_VIDEOS[input_idx % len(IN_VIDEOS)]
+        output_path = f"{args.output}".replace("IDX", str(input_idx))
+        print("Input:", input_path)
+        print("Output:", output_path, "(disabled by -n)" if args.no_video else "")
 
         cv2.namedWindow(WINDOW_TITLE, cv2.WINDOW_NORMAL)
         cv2.resizeWindow(WINDOW_TITLE, 1920//2, 1080//2)
@@ -449,7 +458,7 @@ class Main:
         detector = Detector2()
 
         fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-        cap = cv2.VideoCapture(args.input)
+        cap = cv2.VideoCapture(input_path)
         writer = None
         try:
             # Get input video properties
@@ -460,8 +469,8 @@ class Main:
             self.view_org = True
 
             if args.no_video == False:
-                writer = cv2.VideoWriter(args.output, fourcc, fps, (width, height), isColor=True)
-                print(f"@@ Writing {width}x{height}@{fps} fps to", args.output)
+                writer = cv2.VideoWriter(output_path, fourcc, fps, (width, height), isColor=True)
+                print(f"@@ Writing {width}x{height}@{fps} fps to", output_path)
 
             last_frame = None
             while cap.isOpened():
