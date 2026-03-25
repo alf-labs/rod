@@ -200,7 +200,7 @@ class Detector2(DetectorBase):
             right_px = right_bases[i]
             peak = peaks[i]
             peak_cv = cv_peaks[peak].item()
-            midpoint = (left_px + right_px) / 2
+            # midpoint = (left_px + right_px) / 2
             width = right_px - left_px
 
             # Apply Width Constraints
@@ -237,6 +237,10 @@ class Detector2(DetectorBase):
                 if rod_center is not None:
                     delta_center = abs(peak - rod_center)
                 if delta_center <= 1 * rod_width:
+                    # Normalize the width around the peak
+                    left_px = int(peak - rod_width / 2)
+                    right_px = left_px + rod_width
+
                     if best is None:
                         best = Rod(left_px, right_px, score)
                         ytb = yt
@@ -337,12 +341,12 @@ class Detector2(DetectorBase):
         window = 5
         cv_lu = np.convolve(cv_lu, np.ones(window)/window, mode="same")
 
-        if self.last_cv_lu is not None:
-            cv_lu = self.weight(cv_lu, self.last_cv_lu)
-        self.last_cv_lu = cv_lu
-        draw_line(self.y_np_vector(cv_lu), 0, -1, (0, 165, 255), self.overlay)
+        # TEMP -- disable the weighted temporal smoothing on the CV signal
+        # if self.last_cv_lu is not None:
+        #     cv_lu = self.weight(cv_lu, self.last_cv_lu)
+        # self.last_cv_lu = cv_lu
+        # draw_line(self.y_np_vector(cv_lu), 0, -1, (0, 165, 255), self.overlay)
 
-        # Adaptive thresholding
         # Adaptive thresholding
         epsilon = 1e-6
         cv_lu_inv = 1 - cv_lu
@@ -353,10 +357,24 @@ class Detector2(DetectorBase):
             peak_threshold = np.max(cv_lu_inv) * .95
         self.last_threshold = peak_threshold
 
+        # Hypothesis: we can use the mean/max to detect tunnels and disable rod detection under a certain level
+        _mi = np.min(cv_lu_inv)
+        _me = np.mean(cv_lu_inv)
+        _ma = np.max(cv_lu_inv)
+        # print("@@ peak threshold", peak_threshold, ", min cv:", _mi, ", mean cv:", _me, ", max cv:", _ma)
+        text = f"threshold {peak_threshold:4.3f}, min {_mi:4.3f} < mean {_me:4.3f} < max {_ma:4.3f}"
+        cv2.putText(self.overlay, text,
+            (10, 60),           # bottom-left coord
+            cv2.FONT_HERSHEY_DUPLEX,    # font
+            .75,                          # font scale
+            (255, 255, 0),              # color
+            1 )                         # line thickness
+
         cv_mask = cv_lu_inv >= peak_threshold
         cv_peaks = cv_lu_inv * cv_mask
-        draw_line(cv_peaks * 255, 0, -1, (0, 255, 255), self.overlay)
-        self.draw_threshold(self.y_np_scalar(peak_threshold, 1), (0, 255, 0), self.overlay)
+        draw_line(cv_lu_inv * 255, 0, -1, (0, 165, 255), self.overlay)
+        draw_line(cv_peaks  * 255, 0, -1, (0, 255, 255), self.overlay)
+        self.draw_threshold(peak_threshold * 255, (0, 255, 0), self.overlay)
 
         new_rod = self.find_rod_peaks(cv_peaks)
         if new_rod is not None:
