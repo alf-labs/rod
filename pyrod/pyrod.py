@@ -6,6 +6,7 @@ if not "VIRTUAL_ENV" in os.environ:
     exit(1)
 IS_RPI = os.path.isfile("/etc/rpi-issue")
 
+import argparse
 import base64
 import sys
 import time
@@ -163,12 +164,14 @@ class Detector2(DetectorBase):
 
     def find_rod_peaks(self, cv_peaks):
         if self.current_rod is None:
+            rod_center = None
             score_center = cv_peaks.size / 2
             rod_left = -1
             rod_right = -1
         else:
             # score_center = self.current_rod.center()
             score_center = cv_peaks.size / 2
+            rod_center = self.current_rod.center()
             rod_left = self.current_rod.left
             rod_right = self.current_rod.right
 
@@ -202,10 +205,6 @@ class Detector2(DetectorBase):
             midpoint = (left_px + right_px) / 2
             width = right_px - left_px
 
-            # candidates.append(
-            #     f"<peak {peak} = {peak_cv}, {left_px} < {midpoint} < {right_px}, w/ {width} >"
-            # )
-
             # Apply Width Constraints
             # yet check any peak overlapping the current rod
             cond_width = min_width <= width <= max_width
@@ -220,13 +219,7 @@ class Detector2(DetectorBase):
                 delta_width = width - rod_width
                 score = peak_cv * 1000 - abs(delta_center) - abs(delta_width) / 10
 
-                # if cond_middle:
-                #     # We want to mostly use the old rod position, slightly shifted towards
-                #     # the new midpoint; we're trying to keep the same width.
-                #     left_px = int(self.weight(rod_left, rod_left + delta_center))
-                #     right_px = int(self.weight(rod_right, rod_right + delta_center))
-
-                # ys = int(y + max(0, min(score + 255 - 1, 255)))
+                # DEBUG draw
                 ys += 5
                 cv2.line(self.overlay, (left_px, ys), (right_px, ys), (255, 0, 0), 3)
                 text = f"{score:4.3f}"
@@ -240,12 +233,18 @@ class Detector2(DetectorBase):
 
                 # print(f"[{i}] yt {yt} > {score}")
 
-                if best is None:
-                    best = Rod(left_px, right_px, score)
-                    ytb = yt
-                elif score > best.score:
-                    best = Rod(left_px, right_px, score)
-                    ytb = yt
+                # Only accept this has a suitable rod if it hasn't moved more than
+                # an acceptable margin, in this case arbitrarily the full rod size.
+                delta_center = 0
+                if rod_center is not None:
+                    delta_center = abs(peak - rod_center)
+                if delta_center <= 1 * rod_width:
+                    if best is None:
+                        best = Rod(left_px, right_px, score)
+                        ytb = yt
+                    elif score > best.score:
+                        best = Rod(left_px, right_px, score)
+                        ytb = yt
 
         # DEBUG reprint the best match with a different color
         if best is not None:
@@ -260,18 +259,10 @@ class Detector2(DetectorBase):
                 1 )                         # line thickness
             # print(f"best yt {ytb} > {best.score}")
 
-        # # Ignore the best candidate if its score is drastically worse than the current one.
-        # # Since the score is a number of pixels off the center of the current rod, we can
-        # # compare the score delta to the rod width.
-        # if self.current_rod is not None:
-        #     curr_score = self.current_rod.score
-        #     if best_candidate.score < curr_score - 2 * rod_width:
-        #         return None
-
         return best
 
 
-    def find_rod_valleys(self, cv_under_threshold):
+    def find_rod_valleys_unused(self, cv_under_threshold):
         """
         Finds the rod by searching for low-variance valleys in a 1D signal.
         """
@@ -360,9 +351,9 @@ class Detector2(DetectorBase):
             #     self.trigger_pause = True
 
             new_rod = Rod(
-                left=self.weight(old.left, new_rod.left),
-                right=self.weight(old.right, new_rod.right),
-                score=self.weight(old.score, new_rod.score)
+                left=self.weight(old.left, new_rod.left, 0.5),
+                right=self.weight(old.right, new_rod.right, 0.5),
+                score=self.weight(old.score, new_rod.score, 0.5)
             )
             self.current_rod = new_rod
             # print("@@ new rod:", new_rod)
@@ -435,17 +426,28 @@ class Detector2(DetectorBase):
         else:
             threshold = 0
 
-        if self.last_threshold is not None:
-            threshold = self.weight_asymetric(self.last_threshold, threshold)
-        self.last_threshold = threshold
+
+        # if self.last_threshold is not None:
+        #     threshold = self.weight_asymetric(self.last_threshold, threshold)
 
         # print(f"CVs: min: {np.min(cv_lu):.3f}, mean: {np.mean(cv_lu):.3f}, max: {np.max(cv_lu):.3f}, threshold: {threshold:.3f}")
 
         # self.detect_rod_prominence(cv_lu)
 
-        cv_mask = cv_lu < threshold
-        cv_peaks = (1 - cv_lu) * cv_mask
-        peak_threshold = 1 - threshold
+        cv_lu_inv = 1 - cv_lu
+
+        # Adaptive thresholding
+        cv_filtered = cv_lu_inv[cv_lu_inv < 1 - epsilon]
+        if cv_filtered.size > 0:
+            peak_threshold = np.percentile(cv_filtered, 80)
+        else:
+            peak_threshold = np.max(cv_lu_inv) * .95
+        self.last_threshold = peak_threshold
+
+        print("threshold", threshold, ", peak ", peak_threshold, "vs", 1-threshold)
+
+        cv_mask = cv_lu_inv >= peak_threshold
+        cv_peaks = cv_lu_inv * cv_mask
         draw_line(cv_peaks * 255, 0, -1, (0, 255, 255), self.overlay)
         self.draw_threshold(self.y_np_scalar(peak_threshold, 1), (0, 255, 0), self.overlay)
         # print("@@ peak_threshold: ", peak_threshold)
@@ -496,6 +498,12 @@ class Main:
     def run(self):
         print("@@ Run")
 
+        parser = argparse.ArgumentParser(description="PyRod")
+        parser.add_argument("-i", "--input", default=IN_VIDEOS[0], help="Input video")
+        parser.add_argument("-o", "--output", default=OUT_VIDEO_FILE_PATH, help="Output video")
+        parser.add_argument("-n", "--no-video", action="store_true", help="Skip Video Output")
+        args = parser.parse_args()
+
         cv2.namedWindow(WINDOW_TITLE, cv2.WINDOW_NORMAL)
         cv2.resizeWindow(WINDOW_TITLE, 1920//2, 1080//2)
         def _mouse_callback(event, x, y, flags, param):
@@ -512,7 +520,7 @@ class Main:
         detector = Detector2()
 
         fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-        cap = cv2.VideoCapture(IN_VIDEOS[0])
+        cap = cv2.VideoCapture(args.input)
         writer = None
         try:
             # Get input video properties
@@ -521,8 +529,9 @@ class Main:
             fps = cap.get(cv2.CAP_PROP_FPS)
             fps_ms = int(1000 / fps)
 
-            writer = cv2.VideoWriter(OUT_VIDEO_FILE_PATH, fourcc, fps, (width, height), isColor=True)
-            print(f"@@ Writing {width}x{height}@{fps} fps to", OUT_VIDEO_FILE_PATH)
+            if args.no_video == False:
+                writer = cv2.VideoWriter(args.output, fourcc, fps, (width, height), isColor=True)
+                print(f"@@ Writing {width}x{height}@{fps} fps to", args.output)
 
             last_frame = None
             while cap.isOpened():
@@ -558,7 +567,7 @@ class Main:
                     show_frame = detector.combine_overlay(result)
                 cv2.imshow(WINDOW_TITLE, show_frame)
 
-                if not paused:
+                if writer is not None and not paused:
                     writer.write(show_frame)
 
                 if detector.trigger_pause:
