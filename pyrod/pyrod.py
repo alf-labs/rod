@@ -167,7 +167,8 @@ class Detector2(DetectorBase):
             rod_left = -1
             rod_right = -1
         else:
-            score_center = self.current_rod.center()
+            # score_center = self.current_rod.center()
+            score_center = cv_peaks.size / 2
             rod_left = self.current_rod.left
             rod_right = self.current_rod.right
 
@@ -179,11 +180,10 @@ class Detector2(DetectorBase):
         )
         # print("@@ peaks", peaks, " // props", props)
 
-        candidates = []
-
         y = self.height - GRAPH_Y_OFFSET
         ys = y - 255
         yt = ys
+        ytb = yt
 
         rod_width = self.rod_width_px
         min_width = self.rod_w_range_px[0]
@@ -192,6 +192,7 @@ class Detector2(DetectorBase):
         left_bases = props["left_bases"]
         right_bases = props["right_bases"]
         num_peaks = len(peaks)
+        best = None
 
         for i in range(0, num_peaks):
             left_px = left_bases[i]
@@ -217,7 +218,7 @@ class Detector2(DetectorBase):
                 # and further degraded by the absolute difference from the ideal width.
                 delta_center = peak - score_center
                 delta_width = width - rod_width
-                score = peak_cv - abs(delta_center) - abs(delta_width) / 100
+                score = peak_cv * 1000 - abs(delta_center) - abs(delta_width) / 10
 
                 # if cond_middle:
                 #     # We want to mostly use the old rod position, slightly shifted towards
@@ -225,13 +226,11 @@ class Detector2(DetectorBase):
                 #     left_px = int(self.weight(rod_left, rod_left + delta_center))
                 #     right_px = int(self.weight(rod_right, rod_right + delta_center))
 
-                candidates.append( Rod(left_px, right_px, score) )
-
                 # ys = int(y + max(0, min(score + 255 - 1, 255)))
                 ys += 5
                 cv2.line(self.overlay, (left_px, ys), (right_px, ys), (255, 0, 0), 3)
                 text = f"{score:4.3f}"
-                yt -= 5
+                yt -= 10
                 cv2.putText(self.overlay, text,
                     (left_px, yt),           # bottom-left coord
                     cv2.FONT_HERSHEY_DUPLEX,    # font
@@ -239,23 +238,37 @@ class Detector2(DetectorBase):
                     (255, 0, 0),              # color
                     1 )                         # line thickness
 
+                # print(f"[{i}] yt {yt} > {score}")
 
-        # Find best match (highest score)
-        if not candidates:
-            return None
-        # print(candidates)
-        # print("@@ ", self.last_threshold, " >> ", candidates)
-        best_candidate = max(candidates, key=lambda x: x.score)
+                if best is None:
+                    best = Rod(left_px, right_px, score)
+                    ytb = yt
+                elif score > best.score:
+                    best = Rod(left_px, right_px, score)
+                    ytb = yt
 
-        # Ignore the best candidate if its score is drastically worse than the current one.
-        # Since the score is a number of pixels off the center of the current rod, we can
-        # compare the score delta to the rod width.
-        if self.current_rod is not None:
-            curr_score = self.current_rod.score
-            if best_candidate.score < curr_score - 2 * rod_width:
-                return None
+        # DEBUG reprint the best match with a different color
+        if best is not None:
+            text = f"{best.score:4.3f}"
+            ys = ytb + 5
+            cv2.line(self.overlay, (best.left, ys), (best.right, ys), (0, 0, 255), 3)
+            cv2.putText(self.overlay, text,
+                (best.left, ytb),           # bottom-left coord
+                cv2.FONT_HERSHEY_DUPLEX,    # font
+                .75,                          # font scale
+                (0, 0, 255),              # color
+                1 )                         # line thickness
+            # print(f"best yt {ytb} > {best.score}")
 
-        return best_candidate
+        # # Ignore the best candidate if its score is drastically worse than the current one.
+        # # Since the score is a number of pixels off the center of the current rod, we can
+        # # compare the score delta to the rod width.
+        # if self.current_rod is not None:
+        #     curr_score = self.current_rod.score
+        #     if best_candidate.score < curr_score - 2 * rod_width:
+        #         return None
+
+        return best
 
 
     def find_rod_valleys(self, cv_under_threshold):
