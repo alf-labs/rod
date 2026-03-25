@@ -23,13 +23,13 @@ except ModuleNotFoundError as e:
     exit(1)
 
 WINDOW_TITLE = "Rod Sample"
-VIDEOS = [
+IN_VIDEOS = [
     "../samples/rod1_front_randall_up_2025-03-23.mp4",
     "../samples/rod1_rear_randall_up_2025-03-23.mp4",
 ]
 
-FPS = 30
-FPS_MS = 1000//FPS
+OUT_VIDEO_FILE_PATH = "output_%s.mp4" % time.strftime("%Y-%m-%d_%H-%M-%S")
+
 GRAPH_Y_OFFSET = 10
 NUM_BOTTOM_ROWS_CV_PCT = 50/720
 ROD_WIDTH = 35/1280
@@ -504,8 +504,6 @@ class Main:
                 self.my = y
         cv2.setMouseCallback(WINDOW_TITLE, _mouse_callback)
 
-        width = 0
-        height = 0
         loop_s = 0
         init_once = True
         frame_count = 0
@@ -513,8 +511,19 @@ class Main:
 
         detector = Detector2()
 
-        cap = cv2.VideoCapture(VIDEOS[0])
+        fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+        cap = cv2.VideoCapture(IN_VIDEOS[0])
+        writer = None
         try:
+            # Get input video properties
+            width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+            height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+            fps = cap.get(cv2.CAP_PROP_FPS)
+            fps_ms = int(1000 / fps)
+
+            writer = cv2.VideoWriter(OUT_VIDEO_FILE_PATH, fourcc, fps, (width, height), isColor=True)
+            print(f"@@ Writing {width}x{height}@{fps} fps to", OUT_VIDEO_FILE_PATH)
+
             last_frame = None
             while cap.isOpened():
                 start_loop_s = time.perf_counter()
@@ -533,7 +542,6 @@ class Main:
                         continue
 
                 if init_once:
-                    height, width = frame.shape[:2]
                     print(f"Video size: {width}x{height}")
                     detector.init_size(width, height)
                     init_once = False
@@ -543,17 +551,22 @@ class Main:
 
                 #self.print_mouse_rgb(frame, detector.overlay)
                 self.print_fps(loop_s, detector.overlay)
+
                 if self.view_org:
-                    cv2.imshow(WINDOW_TITLE, detector.combine_overlay(frame))
+                    show_frame = detector.combine_overlay(frame)
                 else:
-                    cv2.imshow(WINDOW_TITLE, detector.combine_overlay(result))
+                    show_frame = detector.combine_overlay(result)
+                cv2.imshow(WINDOW_TITLE, show_frame)
+
+                if not paused:
+                    writer.write(show_frame)
 
                 if detector.trigger_pause:
                     print("@@ Detector triggered pause. Space to continue.")
                     detector.trigger_pause = False
                     paused = True
 
-                key = cv2.waitKey(FPS_MS) & 0xFF
+                key = cv2.waitKey(fps_ms) & 0xFF
                 if key == ord('q'):
                     break
                 elif key == ord(' '):
@@ -577,6 +590,8 @@ class Main:
                 end_loop_s = time.perf_counter()
                 loop_s = end_loop_s - start_loop_s
         finally:
+            if writer is not None:
+                writer.release()
             cap.release()
             cv2.destroyAllWindows()
 
