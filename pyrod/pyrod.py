@@ -301,7 +301,7 @@ class Detector2(DetectorBase):
         y = self.height - int(threshold_y) - GRAPH_Y_OFFSET
         cv2.line(dest, (0, y), (self.width, y), color_threshold, 1)
 
-    def extract_roi_for_cv(self, lu):
+    def extract_roi_for_cv(self, lu, roi_q):
         # Extract the N bottom rows
         N=self.num_bottom_rows_cv
         bottom_lu = lu[-N:, :].copy()
@@ -312,57 +312,73 @@ class Detector2(DetectorBase):
 
         # Apply Histogram Stretching (Min-Max Normalization)
         # This stretches the resulting L channel to the full 0-255 range
-        bottom_lu = cv2.normalize(lu_clahe, None, alpha=0, beta=255, norm_type=cv2.NORM_MINMAX)
+        contrast_lu = cv2.normalize(lu_clahe, None, alpha=0, beta=255, norm_type=cv2.NORM_MINMAX)
 
         # zero the left and right areas we don't want to analyze
-        q = self.width // 4
-        bottom_lu[:, :q] = 0
-        bottom_lu[:, -q:] = 0
+        contrast_lu[:, :roi_q] = 0
+        contrast_lu[:, -roi_q:] = 0
 
         # for debugging, place the modified lu back into the original
-        lu[-N:, :] = bottom_lu
+        lu[-N:, :] = contrast_lu
 
-        return bottom_lu
+        return bottom_lu, contrast_lu
+
+    def is_frame_too_dark(self, roi_lu, mean_threshold=15, std_threshold=15):
+        mean_intensity = np.mean(roi_lu)
+        std_intensity = np.std(roi_lu)
+        return mean_intensity < mean_threshold and std_intensity < std_threshold, mean_intensity, std_intensity
 
     def filter(self, frame):
+        cv_smooth_window = 5
+        epsilon = 1e-6
+        roi_q = self.width // 4
+        bt_cv_tuunel_threshold = 0.003
+
         lab = cv2.cvtColor(frame, cv2.COLOR_BGR2LAB)
 
         # lu, au, bu = cv2.split(lab)     # uint8
         lu = lab[:, :, 0]
 
         # Extract the N bottom rows and zero the left and right areas we don't want to analyze
-        bottom_lu = self.extract_roi_for_cv(lu)
-
+        # Bottom lu is the unmodified bottom rows extracted from the source (must be pristine for
+        # is_frame_too_dark to work).
+        # Contrast lu is the modified CLAHE bottom rows, with the window ROI applied to it.
+        # The contrasted lu is not usable in low-luminosity tunnels, too many compression artifacts.
+        # Contrast_lu has an ROI with zeroed bands on the borders.
         # Even though we only filter on the middle of the image, we keep a vector of self.width
         # for ease and consistency. Our images are not very large so it's not a big penalty.
-        cv_lu = self.get_cv_vectorized(bottom_lu)
+        bottom_lu, contrast_lu = self.extract_roi_for_cv(lu, roi_q)
 
-        # Smooth the CV vector
-        window = 5
-        cv_lu = np.convolve(cv_lu, np.ones(window)/window, mode="same")
+        # We can use the original bottom CV to detect tunnels and disable rod detection.
+        # The mean/std plumets in tunnels.
+        is_dark, bt_mean, bt_std = self.is_frame_too_dark(bottom_lu[:, roi_q:-roi_q])
+        if not is_dark:
+            # Compute and smooth the CV vector
+            cv_lu = self.get_cv_vectorized(contrast_lu)
+            cv_lu = np.convolve(cv_lu, np.ones(cv_smooth_window)/cv_smooth_window, mode="same")
 
-        # TEMP -- disable the weighted temporal smoothing on the CV signal
-        # if self.last_cv_lu is not None:
-        #     cv_lu = self.weight(cv_lu, self.last_cv_lu)
-        # self.last_cv_lu = cv_lu
-        # draw_line(self.y_np_vector(cv_lu), 0, -1, (0, 165, 255), self.overlay)
+            # Adaptive thresholding
+            cv_lu_inv = 1 - cv_lu
+            cv_filtered = cv_lu_inv[cv_lu_inv < 1 - epsilon]
+            if cv_filtered.size > 0:
+                peak_threshold = np.percentile(cv_filtered, 80)
+            else:
+                peak_threshold = np.max(cv_lu_inv) * .95
+            self.last_threshold = peak_threshold
 
-        # Adaptive thresholding
-        epsilon = 1e-6
-        cv_lu_inv = 1 - cv_lu
-        cv_filtered = cv_lu_inv[cv_lu_inv < 1 - epsilon]
-        if cv_filtered.size > 0:
-            peak_threshold = np.percentile(cv_filtered, 80)
-        else:
-            peak_threshold = np.max(cv_lu_inv) * .95
-        self.last_threshold = peak_threshold
+            cv_mask = cv_lu_inv >= peak_threshold
+            cv_peaks = cv_lu_inv * cv_mask
+            # draw_line(self.y_np_vector(bt_cv), 0, -1, (128, 128, 128), self.overlay)
+            draw_line(cv_lu_inv * 255, 0, -1, (0, 165, 255), self.overlay)
+            draw_line(cv_peaks  * 255, 0, -1, (0, 255, 255), self.overlay)
+            self.draw_threshold(peak_threshold * 255, (0, 255, 0), self.overlay)
 
-        # Hypothesis: we can use the mean/max to detect tunnels and disable rod detection under a certain level
-        _mi = np.min(cv_lu_inv)
-        _me = np.mean(cv_lu_inv)
-        _ma = np.max(cv_lu_inv)
-        # print("@@ peak threshold", peak_threshold, ", min cv:", _mi, ", mean cv:", _me, ", max cv:", _ma)
-        text = f"threshold {peak_threshold:4.3f}, min {_mi:4.3f} < mean {_me:4.3f} < max {_ma:4.3f}"
+            new_rod = self.find_rod_peaks(cv_peaks)
+            if new_rod is not None:
+                self.merge_rod(new_rod)
+
+        # text = f"threshold {peak_threshold:4.3f}, bt_cv_median {bt_cv_median:4.3f}"
+        text = f"threshold {self.last_threshold:4.3f}, bt_mean {bt_mean:4.1f}, bt_std {bt_std:4.1f}"
         cv2.putText(self.overlay, text,
             (10, 60),           # bottom-left coord
             cv2.FONT_HERSHEY_DUPLEX,    # font
@@ -370,17 +386,7 @@ class Detector2(DetectorBase):
             (255, 255, 0),              # color
             1 )                         # line thickness
 
-        cv_mask = cv_lu_inv >= peak_threshold
-        cv_peaks = cv_lu_inv * cv_mask
-        draw_line(cv_lu_inv * 255, 0, -1, (0, 165, 255), self.overlay)
-        draw_line(cv_peaks  * 255, 0, -1, (0, 255, 255), self.overlay)
-        self.draw_threshold(peak_threshold * 255, (0, 255, 0), self.overlay)
-
-        new_rod = self.find_rod_peaks(cv_peaks)
-        if new_rod is not None:
-            self.merge_rod(new_rod)
         self.draw_rod(self.current_rod)
-
         return cv2.cvtColor(lu, cv2.COLOR_GRAY2BGR)
 
 
@@ -451,6 +457,7 @@ class Main:
             height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
             fps = cap.get(cv2.CAP_PROP_FPS)
             fps_ms = int(1000 / fps)
+            self.view_org = True
 
             if args.no_video == False:
                 writer = cv2.VideoWriter(args.output, fourcc, fps, (width, height), isColor=True)
@@ -465,9 +472,11 @@ class Main:
                     ret, frame = cap.read()
                     if not ret:
                         break
+                    frame_count += 1
                     last_frame = frame.copy()
+                    if self.view_org and frame_count == 50:
+                        self.view_org = False
 
-                frame_count += 1
                 _skip_num = self.skip_num
                 if _skip_num > 1:
                     if frame_count % _skip_num != 0:
