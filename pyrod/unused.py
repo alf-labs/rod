@@ -269,6 +269,79 @@ class Detector2(DetectorBase):
             cv2.line(dest, (p - w2, y), (p + w2, y), color_peaks, 2)
             y -= 2
 
+    def find_rod_valleys_unused(self, cv_under_threshold):
+        """
+        Finds the rod by searching for low-variance valleys in a 1D signal.
+        """
+        if self.current_rod is None:
+            score_center = cv_under_threshold.size / 2
+            rod_left = -1
+            rod_right = -1
+        else:
+            score_center = self.current_rod.center()
+            rod_left = self.current_rod.left
+            rod_right = self.current_rod.right
+
+        # Group contiguous 'valley' pixels
+        # labels is an array where each valley is numbered 1, 2, 3...
+        labels, num_features = scipy.ndimage.label(cv_under_threshold)
+
+        candidates = []
+
+        y = self.height - GRAPH_Y_OFFSET
+
+        rod_width = self.rod_width_px
+        min_width = self.rod_w_range_px[0]
+        max_width = self.rod_w_range_px[1]
+
+
+        for i in range(1, num_features + 1):
+            indices = np.where(labels == i)[0]
+            width = len(indices)
+            left_px = indices[0].item()
+            right_px = indices[-1].item()
+            midpoint = (left_px + right_px) / 2
+
+            # Apply Width Constraints
+            # yet check any segment overlapping the current rod
+            cond_width = min_width <= width <= max_width
+            cond_middle = rod_left <= midpoint <= rod_right
+            if cond_width or cond_middle:
+
+                # Calculate Center Score
+                # Lower distance to center = smaller score -- we want the lowest score
+                delta_center = midpoint - score_center
+                score = abs(delta_center)
+                # Score is also degraded by how much width differs from expected width
+                score += abs(width - rod_width) / 10
+
+                if cond_middle:
+                    # We want to mostly use the old rod position, slightly shifted towards
+                    # the new midpoint; we're trying to keep the same width.
+                    left_px = int(self.weight(rod_left, rod_left + delta_center))
+                    right_px = int(self.weight(rod_right, rod_right + delta_center))
+
+                candidates.append( Rod(left_px, right_px, score) )
+
+                ys = int(y - min(score / 2, 255))
+                cv2.line(self.overlay, (left_px, ys), (right_px, ys), (255, 0, 0), 3)
+
+        # Find best match (lowest score)
+        if not candidates:
+            return None
+        # print("@@ ", self.last_threshold, " >> ", candidates)
+        best_candidate = min(candidates, key=lambda x: x.score)
+
+        # Ignore the best candidate if its score is drastically worse than the current one.
+        # Since the score is a number of pixels off the center of the current rod, we can
+        # compare the score delta to the rod width.
+        if self.current_rod is not None:
+            curr_score = self.current_rod.score
+            if best_candidate.score > curr_score + 2 * rod_width:
+                return None
+
+        return best_candidate
+
 
 
 if __name__ == "__main__":

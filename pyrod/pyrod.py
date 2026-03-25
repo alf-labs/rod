@@ -32,7 +32,7 @@ IN_VIDEOS = [
 OUT_VIDEO_FILE_PATH = "output_%s.mp4" % time.strftime("%Y-%m-%d_%H-%M-%S")
 
 GRAPH_Y_OFFSET = 10
-NUM_BOTTOM_ROWS_CV_PCT = 50/720
+NUM_BOTTOM_ROWS_CV_PCT = 100/720
 ROD_WIDTH = 35/1280
 ROD_W_RANGE = (25/1280, 40/1280)
 
@@ -178,8 +178,6 @@ class Detector2(DetectorBase):
         peaks, props = scipy.signal.find_peaks(
             cv_peaks,
             prominence=0.50, # Minimum 'depth' of the valley to be considered
-            # width=self.rod_w_range_px,    # Looking for our ~30px rod
-            # rel_height=0.5     # Calculate width at 50% of the prominence
         )
         # print("@@ peaks", peaks, " // props", props)
 
@@ -260,80 +258,6 @@ class Detector2(DetectorBase):
             # print(f"best yt {ytb} > {best.score}")
 
         return best
-
-
-    def find_rod_valleys_unused(self, cv_under_threshold):
-        """
-        Finds the rod by searching for low-variance valleys in a 1D signal.
-        """
-        if self.current_rod is None:
-            score_center = cv_under_threshold.size / 2
-            rod_left = -1
-            rod_right = -1
-        else:
-            score_center = self.current_rod.center()
-            rod_left = self.current_rod.left
-            rod_right = self.current_rod.right
-
-        # Group contiguous 'valley' pixels
-        # labels is an array where each valley is numbered 1, 2, 3...
-        labels, num_features = scipy.ndimage.label(cv_under_threshold)
-
-        candidates = []
-
-        y = self.height - GRAPH_Y_OFFSET
-
-        rod_width = self.rod_width_px
-        min_width = self.rod_w_range_px[0]
-        max_width = self.rod_w_range_px[1]
-
-
-        for i in range(1, num_features + 1):
-            indices = np.where(labels == i)[0]
-            width = len(indices)
-            left_px = indices[0].item()
-            right_px = indices[-1].item()
-            midpoint = (left_px + right_px) / 2
-
-            # Apply Width Constraints
-            # yet check any segment overlapping the current rod
-            cond_width = min_width <= width <= max_width
-            cond_middle = rod_left <= midpoint <= rod_right
-            if cond_width or cond_middle:
-
-                # Calculate Center Score
-                # Lower distance to center = smaller score -- we want the lowest score
-                delta_center = midpoint - score_center
-                score = abs(delta_center)
-                # Score is also degraded by how much width differs from expected width
-                score += abs(width - rod_width) / 10
-
-                if cond_middle:
-                    # We want to mostly use the old rod position, slightly shifted towards
-                    # the new midpoint; we're trying to keep the same width.
-                    left_px = int(self.weight(rod_left, rod_left + delta_center))
-                    right_px = int(self.weight(rod_right, rod_right + delta_center))
-
-                candidates.append( Rod(left_px, right_px, score) )
-
-                ys = int(y - min(score / 2, 255))
-                cv2.line(self.overlay, (left_px, ys), (right_px, ys), (255, 0, 0), 3)
-
-        # Find best match (lowest score)
-        if not candidates:
-            return None
-        # print("@@ ", self.last_threshold, " >> ", candidates)
-        best_candidate = min(candidates, key=lambda x: x.score)
-
-        # Ignore the best candidate if its score is drastically worse than the current one.
-        # Since the score is a number of pixels off the center of the current rod, we can
-        # compare the score delta to the rod width.
-        if self.current_rod is not None:
-            curr_score = self.current_rod.score
-            if best_candidate.score > curr_score + 2 * rod_width:
-                return None
-
-        return best_candidate
 
     def merge_rod(self, new_rod):
         if self.current_rod is None:
@@ -419,24 +343,9 @@ class Detector2(DetectorBase):
         draw_line(self.y_np_vector(cv_lu), 0, -1, (0, 165, 255), self.overlay)
 
         # Adaptive thresholding
-        epsilon = 1e-6
-        cv_filtered = cv_lu[cv_lu > epsilon]
-        if cv_filtered.size > 0:
-            threshold = np.percentile(cv_filtered, self.rod_width_px)
-        else:
-            threshold = 0
-
-
-        # if self.last_threshold is not None:
-        #     threshold = self.weight_asymetric(self.last_threshold, threshold)
-
-        # print(f"CVs: min: {np.min(cv_lu):.3f}, mean: {np.mean(cv_lu):.3f}, max: {np.max(cv_lu):.3f}, threshold: {threshold:.3f}")
-
-        # self.detect_rod_prominence(cv_lu)
-
-        cv_lu_inv = 1 - cv_lu
-
         # Adaptive thresholding
+        epsilon = 1e-6
+        cv_lu_inv = 1 - cv_lu
         cv_filtered = cv_lu_inv[cv_lu_inv < 1 - epsilon]
         if cv_filtered.size > 0:
             peak_threshold = np.percentile(cv_filtered, 80)
@@ -444,19 +353,15 @@ class Detector2(DetectorBase):
             peak_threshold = np.max(cv_lu_inv) * .95
         self.last_threshold = peak_threshold
 
-        print("threshold", threshold, ", peak ", peak_threshold, "vs", 1-threshold)
-
         cv_mask = cv_lu_inv >= peak_threshold
         cv_peaks = cv_lu_inv * cv_mask
         draw_line(cv_peaks * 255, 0, -1, (0, 255, 255), self.overlay)
         self.draw_threshold(self.y_np_scalar(peak_threshold, 1), (0, 255, 0), self.overlay)
-        # print("@@ peak_threshold: ", peak_threshold)
 
-        # new_rod = self.find_rod_valleys(cv_mask)
         new_rod = self.find_rod_peaks(cv_peaks)
         if new_rod is not None:
             self.merge_rod(new_rod)
-            self.draw_rod(self.current_rod)
+        self.draw_rod(self.current_rod)
 
         return cv2.cvtColor(lu, cv2.COLOR_GRAY2BGR)
 
@@ -575,6 +480,9 @@ class Main:
                     detector.trigger_pause = False
                     paused = True
 
+                end_loop_s = time.perf_counter()
+                loop_s = end_loop_s - start_loop_s
+
                 key = cv2.waitKey(fps_ms) & 0xFF
                 if key == ord('q'):
                     break
@@ -596,8 +504,6 @@ class Main:
                 elif key == ord('4'):
                     self.zoom = 4
                     cv2.resizeWindow(WINDOW_TITLE, width//4, height//4)
-                end_loop_s = time.perf_counter()
-                loop_s = end_loop_s - start_loop_s
         finally:
             if writer is not None:
                 writer.release()
