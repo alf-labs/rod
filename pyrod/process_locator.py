@@ -9,7 +9,13 @@ from rod_tracker import TemporalRodTracker
 GRAPH_Y_OFFSET = 10
 NUM_BOTTOM_ROWS_CV_PCT = 100/720
 ROD_WIDTH = 35/1280
-ROD_W_RANGE = (25/1280, 40/1280)
+ROD_W_RANGE = (20/1280, 60/1280)
+
+ROI_WIDTH_PCT = 0.3
+
+TRACKER_IOU_PCT=0.4
+TRACKER_MIN_HITS=7
+TRACKER_MAX_MISS=3
 
 class LocatorBase(ProcessorBase):
     def __init__(self):
@@ -69,7 +75,11 @@ class LocatorGen(LocatorBase):
         self.last_threshold = 0
         self.current_rod = None
         self.clahe = cv2.createCLAHE(clipLimit=1.5, tileGridSize=(8, 8))
-        self.temporal_tracker = TemporalRodTracker()
+        self.temporal_tracker = TemporalRodTracker(
+            iou_threshold=TRACKER_IOU_PCT,
+            min_hits=TRACKER_MIN_HITS,
+            max_misses=TRACKER_MAX_MISS
+        )
         self.frame_rods = []
 
     def init_size(self, width, height):
@@ -83,6 +93,10 @@ class LocatorGen(LocatorBase):
         self.rod_width_px = int(ROD_WIDTH * width)
         self.rod_w_range_px = ( int(ROD_W_RANGE[0] * width), int(ROD_W_RANGE[1] * width) )
         print("Rod Width PX: ", self.rod_width_px, "in range", self.rod_w_range_px)
+
+        self.roi_width_px = int(ROI_WIDTH_PCT * width)
+        self.roi_q = int((width - self.roi_width_px) // 2)
+        print("ROI Width PX: ", self.roi_width_px, "px with side bands", self.roi_q, "px")
 
     def weight(self, a, b, weight_a=0.75):
         return a * weight_a + b * (1 - weight_a)
@@ -124,6 +138,18 @@ class LocatorGen(LocatorBase):
 
         return cv_array
 
+    def fit_rod_bounds(self, left_px, right_px, peak, rod_width):
+        left_px = int(left_px)
+        right_px = int(right_px)
+        new_left = int(peak - rod_width / 2)
+        if new_left < left_px:
+            new_left = left_px
+        new_right = new_left + rod_width
+        if new_right > right_px:
+            new_right = right_px
+            new_left = new_right - rod_width
+        return new_left, new_right
+
     def find_rod_peaks(self, cv_peaks):
         if self.current_rod is None:
             rod_center = None
@@ -131,7 +157,6 @@ class LocatorGen(LocatorBase):
             rod_left = -1
             rod_right = -1
         else:
-            # score_center = self.current_rod.center()
             score_center = cv_peaks.size / 2
             rod_center = self.current_rod.center()
             rod_left = self.current_rod.left
@@ -141,9 +166,6 @@ class LocatorGen(LocatorBase):
             cv_peaks,
             prominence=0.50, # Minimum 'depth' of the valley to be considered
         )
-        # print("@@ peaks", peaks, " // props", props)
-
-        y = self.height - GRAPH_Y_OFFSET
 
         rod_width = self.rod_width_px
         min_width = self.rod_w_range_px[0]
@@ -161,14 +183,11 @@ class LocatorGen(LocatorBase):
             right_px = right_bases[i]
             peak = peaks[i]
             peak_cv = cv_peaks[peak].item()
-            # midpoint = (left_px + right_px) / 2
             width = right_px - left_px
 
             # Apply Width Constraints
-            # yet check any peak overlapping the current rod
             cond_width = min_width <= width <= max_width
-            cond_middle = rod_left <= peak <= rod_right
-            if cond_width or cond_middle:
+            if cond_width:
 
                 # Calculate Center Score.
                 # Score starts with the peak's CV value, so we want the highest one.
@@ -176,61 +195,47 @@ class LocatorGen(LocatorBase):
                 # and further degraded by the absolute difference from the ideal width.
                 delta_center = peak - score_center
                 delta_width = width - rod_width
-                score = peak_cv * 1000 - abs(delta_center) - abs(delta_width) / 10
+                score = peak_cv * 1000 - abs(delta_center) * 2 - abs(delta_width)
 
-                # DEBUG draw
-                ys = y - max(min(int(950 - score), 0), 255)
-                cv2.line(self.overlay, (int(left_px), ys), (int(right_px), ys), (255, 0, 0), 3)
-                text = f"{score:4.3f}"
-                ys -= 10
-                cv2.putText(self.overlay, text,
-                    (left_px, ys),           # bottom-left coord
-                    cv2.FONT_HERSHEY_DUPLEX,    # font
-                    .75,                          # font scale
-                    (255, 0, 0),              # color
-                    1 )                         # line thickness
-
-                # print(f"[{i}] yt {yt} > {score}")
-
-                # # Only accept this has a suitable rod if it hasn't moved more than
-                # # an acceptable margin, in this case arbitrarily the full rod size.
-                # delta_center = 0
-                # if rod_center is not None:
-                #     delta_center = abs(peak - rod_center)
-                # if delta_center <= 1 * rod_width:
-
-                # Normalize the width around the peak
-                left_px = int(peak - rod_width / 2)
-                right_px = left_px + rod_width
-
-                # if best is None:
-                #     best = Rod(left_px, right_px, score)
-                #     ytb = yt
-                # elif score > best.score:
-                #     best = Rod(left_px, right_px, score)
-                #     ytb = yt
+                # If the width is much wider than the target, try to
+                # normalize the width around the peak whilst keeping
+                # in the current left/right boundaries
+                if cond_width > rod_width:
+                    left_px, right_px = self.fit_rod_bounds(left_px, right_px, cond_width, rod_width)
 
                 candidates.append( Rod(left_px, right_px, score) )
 
         temp_best = self.temporal_tracker.update(candidates)
-
-        # # DEBUG reprint the best match with a different color
+        best_id = -1
         if temp_best:
             temp_best = temp_best[0]
+            best_id = temp_best.id
             best = temp_best.rod
-            # print("@@ best: ", temp_best)
+            print(f"@@ Best: {temp_best}")
 
-            text = f"{best.score:4.3f}"
-            ys = y - max(min(int(950 - best.score), 0), 255)
-            cv2.line(self.overlay, (int(best.left), ys), (int(best.right), ys), (0, 0, 255), 3)
+        # DEBUG draw
+        y = self.height - GRAPH_Y_OFFSET
+        ys = y - 255
+        for t in self.temporal_tracker.tracks:
+            color = (0, 0, 255) if t.id == best_id else (255, 255, 0)
+            # ys = y - min(max(int(950 - t.rod.score), 0), 255)
+            ys -= 5
+            text1 = f"{t._last_temporal_score:4.2f}"
+            text2 = f"{t.rod.score:4.3f}"
+            cv2.line(self.overlay, (int(t.rod.left), ys), (int(t.rod.right), ys), color, 3)
             ys -= 10
-            cv2.putText(self.overlay, text,
-                (int(best.left), ys),           # bottom-left coord
+            cv2.putText(self.overlay, text2,
+                (int(t.rod.left), ys),      # bottom-left coord
                 cv2.FONT_HERSHEY_DUPLEX,    # font
-                .75,                          # font scale
-                (0, 0, 255),              # color
+                .75,                        # font scale
+                color,                      # color
                 1 )                         # line thickness
-            # print(f"best yt {ytb} > {best.score}")
+            cv2.putText(self.overlay, text1,
+                (int(t.rod.left), ys - 30), # bottom-left coord
+                cv2.FONT_HERSHEY_DUPLEX,    # font
+                .75,                        # font scale
+                color,                      # color
+                1 )                         # line thickness
 
         return best
 
@@ -290,7 +295,7 @@ class LocatorGen(LocatorBase):
     def filter(self, frame_index, frame):
         cv_smooth_window = 5
         epsilon = 1e-6
-        roi_q = self.width // 4
+        roi_q = self.roi_q
         bt_cv_tuunel_threshold = 0.003
 
         lab = cv2.cvtColor(frame, cv2.COLOR_BGR2LAB)

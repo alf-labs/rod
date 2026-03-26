@@ -21,7 +21,7 @@ class RodTrack:
 
 
 class TemporalRodTracker:
-    def __init__(self, iou_threshold=0.4, min_hits=10, max_misses=3):
+    def __init__(self, iou_threshold, min_hits, max_misses):
         self.tracks = []
         self.next_id = 0
         self.iou_threshold = iou_threshold
