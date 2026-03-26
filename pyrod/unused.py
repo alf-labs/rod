@@ -342,6 +342,35 @@ class Detector2(DetectorBase):
 
         return best_candidate
 
+    def merge_rod(self, new_rod):
+        if new_rod is None:
+            return
+        if self.current_rod is None:
+            self.current_rod = new_rod
+        else:
+            old = self.current_rod
+            new_center = new_rod.center()
+            old_center = old.center()
+
+            # # Ignore new rod if it has moved by more than N rod widths
+            # # For testing: we trigger a pause
+            # delta_center = abs(new_center - old_center)
+            # delta_threshold = 3 * self.rod_width_px
+            # if delta_center > delta_threshold:
+            #     self.trigger_pause = True
+
+            new_rod = Rod(
+                left=self.weight(old.left, new_rod.left, 0.5),
+                right=self.weight(old.right, new_rod.right, 0.5),
+                score=self.weight(old.score, new_rod.score, 0.5)
+            )
+            self.current_rod = new_rod
+            # print("@@ new rod:", new_rod)
+            # print("@@ delta", delta_center, "<", delta_threshold, " @@ ", old, " >>> ", self.current_rod)
+            # else:
+            #     print("@@ delta", delta_center, ">=", delta_threshold)
+        return self.current_rod
+
 
 
 if __name__ == "__main__":

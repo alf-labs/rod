@@ -8,6 +8,7 @@ IS_RPI = os.path.isfile("/etc/rpi-issue")
 
 import argparse
 import base64
+import json
 import sys
 import time
 
@@ -60,10 +61,11 @@ def draw_line(source, channel_index, y, color, dest):
 
 
 class Rod:
-    def __init__(self, left, right, score):
+    def __init__(self, left, right, score, frame=0):
         self.left = left
         self.right = right
         self.score = score
+        self.frame = frame
 
     def merge(self, other_rod, weight=0.75):
         wa = weight
@@ -71,6 +73,7 @@ class Rod:
         self.left = self.left * wa + other_rod.left * wb
         self.right = self.right * wa + other_rod.right * wb
         self.score = other_rod.score
+        self.frame = other_rod.frame
 
     def center(self):
         return (self.left + self.right) / 2
@@ -80,6 +83,17 @@ class Rod:
 
     def __repr__(self):
         return f"Rod( {self.left:.3f} -> {self.right:.3f} ; width {self.width():.3f} ; score {self.score:.3f} )"
+
+    def dupAtFrame(self, frame):
+        return Rod(self.left, self.right, self.score, frame)
+
+    def toJson(self):
+        return {
+            "l": self.left,
+            "r": self.right,
+            "s": self.score,
+            "f": self.frame,
+        }
 
 
 class RodTrack:
@@ -183,7 +197,7 @@ class ProcessorBase:
         src_dst[mask > 0] = self.overlay[mask > 0]
         return src_dst
 
-    def filter(self, frame):
+    def filter(self, frame_index, frame):
         return frame
 
 
@@ -195,7 +209,7 @@ class Detector(ProcessorBase):
         self.current_rod = None
         self.clahe = cv2.createCLAHE(clipLimit=1.5, tileGridSize=(8, 8))
         self.temporal_tracker = TemporalRodTracker()
-
+        self.frame_rods = []
 
     def init_size(self, width, height):
         super().init_size(width, height)
@@ -358,35 +372,6 @@ class Detector(ProcessorBase):
 
         return best
 
-    def merge_rod(self, new_rod):
-        if new_rod is None:
-            return
-        if self.current_rod is None:
-            self.current_rod = new_rod
-        else:
-            old = self.current_rod
-            new_center = new_rod.center()
-            old_center = old.center()
-
-            # # Ignore new rod if it has moved by more than N rod widths
-            # # For testing: we trigger a pause
-            # delta_center = abs(new_center - old_center)
-            # delta_threshold = 3 * self.rod_width_px
-            # if delta_center > delta_threshold:
-            #     self.trigger_pause = True
-
-            new_rod = Rod(
-                left=self.weight(old.left, new_rod.left, 0.5),
-                right=self.weight(old.right, new_rod.right, 0.5),
-                score=self.weight(old.score, new_rod.score, 0.5)
-            )
-            self.current_rod = new_rod
-            # print("@@ new rod:", new_rod)
-            # print("@@ delta", delta_center, "<", delta_threshold, " @@ ", old, " >>> ", self.current_rod)
-            # else:
-            #     print("@@ delta", delta_center, ">=", delta_threshold)
-        return self.current_rod
-
     def draw_rod(self, rod):
         if rod is None:
             return
@@ -427,7 +412,7 @@ class Detector(ProcessorBase):
         std_intensity = np.std(roi_lu)
         return mean_intensity < mean_threshold and std_intensity < std_threshold, mean_intensity, std_intensity
 
-    def filter(self, frame):
+    def filter(self, frame_index, frame):
         cv_smooth_window = 5
         epsilon = 1e-6
         roi_q = self.width // 4
@@ -474,7 +459,8 @@ class Detector(ProcessorBase):
 
             new_rod = self.find_rod_peaks(cv_peaks)
             if new_rod is not None:
-                self.merge_rod(new_rod)
+                self.current_rod = new_rod
+                self.frame_rods.append( new_rod.dupAtFrame(frame_index) )
 
         # text = f"threshold {peak_threshold:4.3f}, bt_cv_median {bt_cv_median:4.3f}"
         text = f"threshold {self.last_threshold:4.3f}, bt_mean {bt_mean:4.1f}, bt_std {bt_std:4.1f}"
@@ -486,7 +472,14 @@ class Detector(ProcessorBase):
             1 )                         # line thickness
 
         self.draw_rod(self.current_rod)
+
         return cv2.cvtColor(lu, cv2.COLOR_GRAY2BGR)
+
+    def exportJson(self, filename):
+        content = [ rod.toJson() for rod in self.frame_rods ]
+        with open(filename, "w") as f:
+            json.dump(content, f, indent=2)
+        print(f"@@ Detector JSON output to {filename}")
 
 
 class Main:
@@ -523,6 +516,7 @@ class Main:
             input_idx = int(input_path)
             input_path = IN_VIDEOS[input_idx % len(IN_VIDEOS)]
         output_path = f"{args.output}".replace("IDX", str(input_idx))
+        detector_path = output_path.replace(".mp4", "") + ".1.json"
         print("Input:", input_path)
         print("Output:", output_path, "(disabled by -n)" if args.no_video else "")
 
@@ -580,7 +574,7 @@ class Main:
                     init_once = False
 
                 processor.init_overlay(frame)
-                result = processor.filter(frame)
+                result = processor.filter(frame_count, frame)
 
                 self.print_fps(loop_s, processor.overlay)
 
@@ -625,6 +619,8 @@ class Main:
         finally:
             if writer is not None:
                 writer.release()
+                if processor is not None:
+                    processor.exportJson(detector_path)
             cap.release()
             cv2.destroyAllWindows()
 
