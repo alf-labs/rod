@@ -22,6 +22,7 @@ class Locator(ProcessorBase):
 
     def init_size(self, width, height):
         super().init_size(width, height)
+        print(f"@@ Locator init_size")
 
         # Number of rows to scan at the bottom to get the vertical per-band CV
         self.num_bottom_rows_cv = int(NUM_BOTTOM_ROWS_CV_PCT * height)
@@ -243,7 +244,7 @@ class Locator(ProcessorBase):
         std_intensity = np.std(roi_lu)
         return mean_intensity < mean_threshold and std_intensity < std_threshold, mean_intensity, std_intensity
 
-    def appendFrameRod(self, new_rod):
+    def append_frame_rod(self, new_rod):
         last_rod = None
         last_idx = 0
         if self.frame_rods:
@@ -263,8 +264,6 @@ class Locator(ProcessorBase):
 
         # Append rod for frame new_idx
         self.frame_rods.append(new_rod)
-
-
 
     def filter(self, frame_index, frame):
         cv_smooth_window = 5
@@ -314,7 +313,7 @@ class Locator(ProcessorBase):
             new_rod = self.find_rod_peaks(cv_peaks)
             if new_rod is not None:
                 self.current_rod = new_rod
-                self.appendFrameRod( new_rod.dupAtFrame(frame_index) )
+                self.append_frame_rod( new_rod.dupAtFrame(frame_index) )
 
         # text = f"threshold {peak_threshold:4.3f}, bt_cv_median {bt_cv_median:4.3f}"
         text = f"threshold {self.last_threshold:4.3f}, bt_mean {bt_mean:4.1f}, bt_std {bt_std:4.1f}"
@@ -329,8 +328,11 @@ class Locator(ProcessorBase):
 
         return cv2.cvtColor(lu, cv2.COLOR_GRAY2BGR)
 
-    def exportJson(self, filename):
+    def export(self, filename):
+        print(f"@@ Locator export")
         content = [ rod.toJson() for rod in self.frame_rods ]
         with open(filename, "w") as f:
             json.dump(content, f, indent=2)
-        print(f"@@ Detector JSON output to {filename}")
+        print(f"@@ Locator JSON output to {filename}")
+
+

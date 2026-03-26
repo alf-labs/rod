@@ -8,6 +8,7 @@ class ProcessorBase:
         self.trigger_pause = False
 
     def init_size(self, width, height):
+        print(f"@@ {self} init_size")
         self.width = width
         self.height = height
 
@@ -25,3 +26,9 @@ class ProcessorBase:
 
     def filter(self, frame_index, frame):
         return frame
+
+    def export(self, filename):
+        print(f"@@ {self} export no-op")
+
+    def release(self):
+        print(f"@@ {self} release no-op")

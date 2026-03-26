@@ -40,6 +40,12 @@ class Main:
         self.my = 0
         self.zoom = 1
         self.skip_num = 1
+        self.pause = False
+        self.view_org = False
+        self.allow_export = False
+        self.quit_requested = False
+        self.processors = []
+        self.export_path = {}
 
     def print_fps(self, loop_s, dest):
         fps = 1/loop_s if loop_s > 0 else 0
@@ -53,24 +59,67 @@ class Main:
             (0, 255, 255),              # color
             z )                         # line thickness
 
-    def run(self):
-        print("@@ Run")
-
+    def parseArgs(self):
         parser = argparse.ArgumentParser(description="PyRod")
         parser.add_argument("-i", "--input", default="0", help="Input video")
         parser.add_argument("-o", "--output", default=OUT_VIDEO_FILE_PATH, help="Output video")
         parser.add_argument("-n", "--no-video", action="store_true", help="Skip Video Output")
         args = parser.parse_args()
+        self.args = args
 
         input_idx = "_"
-        input_path = args.input
-        if input_path.isdigit():
-            input_idx = int(input_path)
-            input_path = IN_VIDEOS[input_idx % len(IN_VIDEOS)]
-        output_path = f"{args.output}".replace("IDX", str(input_idx))
-        detector_path = output_path.replace(".mp4", "") + ".1.json"
-        print("Input:", input_path)
-        print("Output:", output_path, "(disabled by -n)" if args.no_video else "")
+        self.input_path = args.input
+        if self.input_path.isdigit():
+            input_idx = int(self.input_path)
+            self.input_path = IN_VIDEOS[input_idx % len(IN_VIDEOS)]
+        self.output_path = f"{args.output}".replace("IDX", str(input_idx))
+        self.locator_path = self.output_path.replace(".mp4", "") + ".1.json"
+        print("Input:", self.input_path)
+        print("Output:", self.output_path, "(disabled by -n)" if args.no_video else "")
+        return args
+
+    def parseKeys(self):
+        key = cv2.waitKey(1) & 0xFF
+        if key == ord('q'):
+            self.quit_requested = True
+        elif key == ord(' '):
+            self.paused = not self.paused
+        elif key == ord('o'):
+            self.view_org = not self.view_org
+        elif key == ord('s'):
+            self.skip_num = 1 + self.skip_num % 4
+        elif key == ord('1'):
+            self.zoom = 1
+            cv2.resizeWindow(WINDOW_TITLE, width, height)
+        elif key == ord('2'):
+            self.zoom = 2
+            cv2.resizeWindow(WINDOW_TITLE, width//2, height//2)
+        elif key == ord('3'):
+            self.zoom = 3
+            cv2.resizeWindow(WINDOW_TITLE, width//3, height//3)
+        elif key == ord('4'):
+            self.zoom = 4
+            cv2.resizeWindow(WINDOW_TITLE, width//4, height//4)
+
+    def next_processor(self, processor, processor_idx):
+        if processor is not None:
+            if self.allow_export:
+                path = self.export_path.get(processor_idx, None)
+                if path:
+                    processor.export(path)
+            processor.release()
+        processor = None
+        processor_idx += 1
+        if processor_idx < len(self.processors):
+            print("@@ Switch to next processor #", processor_idx)
+            processor = self.processors[processor_idx]
+        else:
+            print("@@ No next processor #", processor_idx)
+        return processor, processor_idx
+
+    def run(self):
+        print("@@ Run")
+        args = self.parseArgs()
 
         cv2.namedWindow(WINDOW_TITLE, cv2.WINDOW_NORMAL)
         cv2.resizeWindow(WINDOW_TITLE, 1920//2, 1080//2)
@@ -80,10 +129,8 @@ class Main:
                 self.my = y
         cv2.setMouseCallback(WINDOW_TITLE, _mouse_callback)
 
-        processor = Locator()
-
         fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-        cap = cv2.VideoCapture(input_path)
+        cap = cv2.VideoCapture(self.input_path)
         writer = None
         try:
             # Get input video properties
@@ -94,26 +141,46 @@ class Main:
             loop_s = 0
             init_once = True
             frame_count = 0
-            paused = False
-            view_org = True
+            self.paused = False
+            self.view_org = True
+
+            self.processors.append( Locator() )
+            self.export_path[0] = self.locator_path
+            processor_idx = 0
+            processor = self.processors[0]
 
             if args.no_video == False:
-                writer = cv2.VideoWriter(output_path, fourcc, fps, (width, height), isColor=True)
-                print(f"@@ Writing {width}x{height}@{fps} fps to", output_path)
+                self.allow_export = True
+                writer = cv2.VideoWriter(self.output_path, fourcc, fps, (width, height), isColor=True)
+                print(f"@@ Writing {width}x{height}@{fps} fps to", self.output_path)
 
             last_frame = None
-            while cap.isOpened():
+            while cap.isOpened() and not self.quit_requested:
                 start_loop_s = time.perf_counter()
-                if paused:
+                if self.paused:
                     frame = last_frame.copy()
                 else:
                     ret, frame = cap.read()
                     if not ret:
-                        break
+                        # If video recorded file ends, loop back to the beginning
+                        print(f"@@ capture end reached?")
+                        self.cv2cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+                        ret, frame = cap.read()
+                        if ret:
+                            processor, processor_idx = self.next_processor(processor, processor_idx)
+                            if processor is not None:
+                                init_once = True
+                                frame_count = 0
+                                self.paused = False
+                                self.view_org = True
+                                # If video recorded file ends, loop back to the beginning
+                                self.cv2cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+                        if not ret or processor is None:
+                            break
                     frame_count += 1
                     last_frame = frame.copy()
-                    if view_org and frame_count == 50:
-                        view_org = False
+                    if self.view_org and frame_count == 50:
+                        self.view_org = False
 
                 _skip_num = self.skip_num
                 if _skip_num > 1:
@@ -121,7 +188,7 @@ class Main:
                         continue
 
                 if init_once:
-                    print(f"Video size: {width}x{height}")
+                    print(f"Init Processor {processor_idx}, Video size: {width}x{height}")
                     processor.init_size(width, height)
                     init_once = False
 
@@ -130,13 +197,13 @@ class Main:
 
                 self.print_fps(loop_s, processor.overlay)
 
-                if view_org:
+                if self.view_org:
                     show_frame = processor.combine_overlay(frame)
                 else:
                     show_frame = processor.combine_overlay(result)
                 cv2.imshow(WINDOW_TITLE, show_frame)
 
-                if writer is not None and not paused:
+                if self.allow_export and not paused:
                     writer.write(show_frame)
 
                 if processor.trigger_pause:
@@ -146,33 +213,12 @@ class Main:
 
                 end_loop_s = time.perf_counter()
                 loop_s = end_loop_s - start_loop_s
+                self.parseKeys()
 
-                key = cv2.waitKey(fps_ms) & 0xFF
-                if key == ord('q'):
-                    break
-                elif key == ord(' '):
-                    paused = not paused
-                elif key == ord('o'):
-                    view_org = not view_org
-                elif key == ord('s'):
-                    self.skip_num = 1 + self.skip_num % 4
-                elif key == ord('1'):
-                    self.zoom = 1
-                    cv2.resizeWindow(WINDOW_TITLE, width, height)
-                elif key == ord('2'):
-                    self.zoom = 2
-                    cv2.resizeWindow(WINDOW_TITLE, width//2, height//2)
-                elif key == ord('3'):
-                    self.zoom = 3
-                    cv2.resizeWindow(WINDOW_TITLE, width//3, height//3)
-                elif key == ord('4'):
-                    self.zoom = 4
-                    cv2.resizeWindow(WINDOW_TITLE, width//4, height//4)
         finally:
             if writer is not None:
                 writer.release()
-                if processor is not None:
-                    processor.exportJson(detector_path)
+            self.next_processor(processor, processor_idx)
             cap.release()
             cv2.destroyAllWindows()
 
