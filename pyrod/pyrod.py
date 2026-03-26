@@ -8,7 +8,6 @@ IS_RPI = os.path.isfile("/etc/rpi-issue")
 
 import argparse
 import base64
-import json
 import sys
 import time
 
@@ -18,7 +17,7 @@ try:
     import imutils
     import scipy
     from flask import Flask, render_template, Response, request, jsonify
-    from process_locator import Locator
+    from process_locator import LocatorGen, LocatorRdr
 except ModuleNotFoundError as e:
     print(f"ERROR: Missing library. {e}")
     print( "To fix: $ pip install opencv-python numpy scipy imutils flask")
@@ -31,7 +30,7 @@ IN_VIDEOS = [
     "../samples/rod1_rear_randall_up_2025-03-23.mp4",
 ]
 
-OUT_VIDEO_FILE_PATH = "outputIDX_%s.mp4" % time.strftime("%Y-%m-%d_%H-%M-%S")
+OUT_VIDEO_FILE_PATH = "output/outputIDX_%s.mp4" % time.strftime("%Y-%m-%d_%H-%M-%S")
 
 
 class Main:
@@ -64,6 +63,7 @@ class Main:
         parser.add_argument("-i", "--input", default="0", help="Input video")
         parser.add_argument("-o", "--output", default=OUT_VIDEO_FILE_PATH, help="Output video")
         parser.add_argument("-n", "--no-video", action="store_true", help="Skip Video Output")
+        parser.add_argument("-l", "--locator", default="", help="Locator JSON data to read back")
         args = parser.parse_args()
         self.args = args
 
@@ -73,7 +73,10 @@ class Main:
             input_idx = int(self.input_path)
             self.input_path = IN_VIDEOS[input_idx % len(IN_VIDEOS)]
         self.output_path = f"{args.output}".replace("IDX", str(input_idx))
-        self.locator_path = self.output_path.replace(".mp4", "") + ".1.json"
+        if args.locator:
+            self.locator_path = args.locator
+        else:
+            self.locator_path = self.output_path.replace(".mp4", "") + ".0.json"
         print("Input:", self.input_path)
         print("Output:", self.output_path, "(disabled by -n)" if args.no_video else "")
         return args
@@ -111,10 +114,10 @@ class Main:
         processor = None
         processor_idx += 1
         if processor_idx < len(self.processors):
-            print("@@ Switch to next processor #", processor_idx)
+            print(f"@@ Switch to next processor #{processor_idx}")
             processor = self.processors[processor_idx]
         else:
-            print("@@ No next processor #", processor_idx)
+            print(f"@@ No next processor #{processor_idx}")
         return processor, processor_idx
 
     def run(self):
@@ -141,13 +144,21 @@ class Main:
             loop_s = 0
             init_once = True
             frame_count = 0
+            processor = None
             self.paused = False
             self.view_org = True
 
-            self.processors.append( Locator() )
-            self.export_path[0] = self.locator_path
+            # Processor #0
             processor_idx = 0
+            if args.locator:
+                loc_reader = LocatorRdr()
+                self.processors.append( loc_reader )
+                loc_reader.readJson(self.locator_path)
+            else:
+                self.processors.append( LocatorGen() )
+                self.export_path[0] = self.locator_path
             processor = self.processors[0]
+            print(f"@@ Start with processor #{processor_idx}: {processor}")
 
             if args.no_video == False:
                 self.allow_export = True
@@ -155,6 +166,7 @@ class Main:
                 print(f"@@ Writing {width}x{height}@{fps} fps to", self.output_path)
 
             last_frame = None
+            print(f"@@ Reader cap isOpened: {cap.isOpened()}, {width}x{height}@{fps} fps")
             while cap.isOpened() and not self.quit_requested:
                 start_loop_s = time.perf_counter()
                 if self.paused:
@@ -164,18 +176,19 @@ class Main:
                     if not ret:
                         # If video recorded file ends, loop back to the beginning
                         print(f"@@ capture end reached?")
-                        self.cv2cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+                        cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+                        # Try to read again
                         ret, frame = cap.read()
                         if ret:
+                            print(f"@@ capture looped ok")
                             processor, processor_idx = self.next_processor(processor, processor_idx)
                             if processor is not None:
                                 init_once = True
                                 frame_count = 0
                                 self.paused = False
                                 self.view_org = True
-                                # If video recorded file ends, loop back to the beginning
-                                self.cv2cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
                         if not ret or processor is None:
+                            print(f"@@ capture loop ended")
                             break
                     frame_count += 1
                     last_frame = frame.copy()
@@ -203,7 +216,7 @@ class Main:
                     show_frame = processor.combine_overlay(result)
                 cv2.imshow(WINDOW_TITLE, show_frame)
 
-                if self.allow_export and not paused:
+                if self.allow_export and not self.paused:
                     writer.write(show_frame)
 
                 if processor.trigger_pause:
@@ -216,6 +229,7 @@ class Main:
                 self.parseKeys()
 
         finally:
+            print("@@ Main loop ended.")
             if writer is not None:
                 writer.release()
             self.next_processor(processor, processor_idx)

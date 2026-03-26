@@ -1,4 +1,5 @@
 import cv2
+import json
 import numpy as np
 import scipy
 from processor import ProcessorBase
@@ -10,7 +11,58 @@ NUM_BOTTOM_ROWS_CV_PCT = 100/720
 ROD_WIDTH = 35/1280
 ROD_W_RANGE = (25/1280, 40/1280)
 
-class Locator(ProcessorBase):
+class LocatorBase(ProcessorBase):
+    def __init__(self):
+        super().__init__()
+        self.frame_rods = []
+
+    def init_size(self, width, height):
+        super().init_size(width, height)
+
+    def init_overlay(self, frame):
+        super().init_overlay(frame)
+
+    def append_frame_rod(self, new_rod):
+        last_rod = None
+        last_idx = 0
+        if self.frame_rods:
+            last_rod = self.frame_rods[-1]
+            last_idx = last_rod.frame
+        new_idx = new_rod.frame
+
+        if new_idx > last_idx + 1:
+            if last_rod is None:
+                # Gap before the first rod. We just fill as-is.
+                for idx in range(last_idx + 1, new_idx):
+                    self.frame_rods.append( new_rod.dupAtFrame(idx) )
+            else:
+                # Otherwise we have a frame gap, which we want to close by interpolation.
+                for idx in range(last_idx + 1, new_idx):
+                    self.frame_rods.append( last_rod.dupInterpolateTo(idx, new_rod) )
+
+        # Append rod for frame new_idx
+        self.frame_rods.append(new_rod)
+
+    def draw_rod(self, rod):
+        if rod is None:
+            return
+        left_px = int(rod.left)
+        right_px = int(rod.right)
+        y1 = self.height - GRAPH_Y_OFFSET
+        y2 = y1 - 128
+        cv2.rectangle(self.overlay, (left_px, y1), (right_px, y2), (0, 255, 0), 4)
+
+    def filter(self, frame_index, frame):
+        return super().filter(frame_index, frame)
+
+    def export(self, filename):
+        super().export(filename)
+
+    def release(self):
+        super().release()
+
+
+class LocatorGen(LocatorBase):
     def __init__(self):
         super().__init__()
         self.last_cv_lu = None
@@ -182,15 +234,6 @@ class Locator(ProcessorBase):
 
         return best
 
-    def draw_rod(self, rod):
-        if rod is None:
-            return
-        left_px = int(rod.left)
-        right_px = int(rod.right)
-        y1 = self.height - GRAPH_Y_OFFSET
-        y2 = y1 - 128
-        cv2.rectangle(self.overlay, (left_px, y1), (right_px, y2), (0, 255, 0), 4)
-
     def draw_threshold(self, threshold_y, color_threshold, dest):
         y = self.height - int(threshold_y) - GRAPH_Y_OFFSET
         cv2.line(dest, (0, y), (self.width, y), color_threshold, 1)
@@ -243,27 +286,6 @@ class Locator(ProcessorBase):
         mean_intensity = np.mean(roi_lu)
         std_intensity = np.std(roi_lu)
         return mean_intensity < mean_threshold and std_intensity < std_threshold, mean_intensity, std_intensity
-
-    def append_frame_rod(self, new_rod):
-        last_rod = None
-        last_idx = 0
-        if self.frame_rods:
-            last_rod = self.frame_rods[-1]
-            last_idx = last_rod.frame
-        new_idx = new_rod.frame
-
-        if new_idx > last_idx + 1:
-            if last_rod is None:
-                # Gap before the first rod. We just fill as-is.
-                for idx in range(last_idx + 1, new_idx):
-                    self.frame_rods.append( new_rod.dupAtFrame(idx) )
-            else:
-                # Otherwise we have a frame gap, which we want to close by interpolation.
-                for idx in range(last_idx + 1, new_idx):
-                    self.frame_rods.append( last_rod.dupInterpolateTo(idx, new_rod) )
-
-        # Append rod for frame new_idx
-        self.frame_rods.append(new_rod)
 
     def filter(self, frame_index, frame):
         cv_smooth_window = 5
@@ -335,4 +357,38 @@ class Locator(ProcessorBase):
             json.dump(content, f, indent=2)
         print(f"@@ Locator JSON output to {filename}")
 
+    def release(self):
+        super().release()
+
+
+class LocatorRdr(LocatorBase):
+    def __init__(self):
+        super().__init__()
+
+    def init_size(self, width, height):
+        super().init_size(width, height)
+
+    def init_overlay(self, frame):
+        super().init_overlay(frame)
+
+    def readJson(self, filename):
+        print(f"@@ LocatorRdr JSON input read {filename}")
+        with open(filename, "r") as f:
+            loaded = json.load(f)
+            # JSON should contain one array of Rod.toJson().
+            for entry in loaded:
+                self.append_frame_rod(Rod.fromJson(entry))
+        print(f"@@ LocatorRdr loaded {len(self.frame_rods)} entries from JSON")
+
+    def filter(self, frame_index, frame):
+        if frame_index >= 0 and frame_index < len(self.frame_rods):
+            rod = self.frame_rods[frame_index]
+            self.draw_rod(rod)
+        return frame
+
+    def export(self, filename):
+        super().export(filename)
+
+    def release(self):
+        super().release()
 

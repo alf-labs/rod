@@ -1,3 +1,4 @@
+
 class Rod:
     def __init__(self, left, right, score, frame=0):
         self.left = left
@@ -44,3 +45,24 @@ class Rod:
             "s": self.score,
             "f": self.frame,
         }
+
+    @staticmethod
+    def fromJson(params):
+        # Validate params is a dict with expected fields and types
+        if not isinstance(params, dict):
+            raise ValueError("[Rod.fromJson] params must be a dict")
+
+        required_keys = {"l", "r", "s", "f"}
+        if not required_keys.issubset(params.keys()):
+            raise ValueError(f"[Rod.fromJson] params must contain keys: {required_keys}")
+
+        for key in required_keys:
+            if not isinstance(params[key], (int, float)):
+                raise ValueError(f"[Rod.fromJson] params['{key}'] must be int or float")
+
+        return Rod(
+            params["l"],
+            params["r"],
+            params["s"],
+            params["f"],
+        )
