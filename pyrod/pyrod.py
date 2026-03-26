@@ -18,6 +18,7 @@ try:
     import scipy
     from flask import Flask, render_template, Response, request, jsonify
     from process_locator import LocatorGen, LocatorRdr
+    from process_detector import Detector
 except ModuleNotFoundError as e:
     print(f"ERROR: Missing library. {e}")
     print( "To fix: $ pip install opencv-python numpy scipy imutils flask")
@@ -158,6 +159,8 @@ class Main:
                 self.processors.append( LocatorGen() )
                 self.export_path[0] = self.locator_path
             processor = self.processors[0]
+            # Processor #1
+            self.processors.append( Detector(processor) )
             print(f"@@ Start with processor #{processor_idx}: {processor}")
 
             if args.no_video == False:
@@ -173,7 +176,7 @@ class Main:
                     frame = last_frame.copy()
                 else:
                     ret, frame = cap.read()
-                    if not ret:
+                    if not ret or processor.next_processor_requested:
                         # If video recorded file ends, loop back to the beginning
                         print(f"@@ capture end reached?")
                         cap.set(cv2.CAP_PROP_POS_FRAMES, 0)

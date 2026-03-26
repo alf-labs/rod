@@ -384,6 +384,7 @@ class LocatorRdr(LocatorBase):
             for entry in loaded:
                 self.append_frame_rod(Rod.fromJson(entry))
         print(f"@@ LocatorRdr loaded {len(self.frame_rods)} entries from JSON")
+        self.next_processor_requested = True
 
     def filter(self, frame_index, frame):
         if frame_index >= 0 and frame_index < len(self.frame_rods):

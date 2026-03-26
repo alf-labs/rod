@@ -6,6 +6,7 @@ class ProcessorBase:
         # Overlay is (B,G,R)
         self.overlay = None
         self.trigger_pause = False
+        self.next_processor_requested = False
 
     def init_size(self, width, height):
         print(f"@@ {self} init_size")
