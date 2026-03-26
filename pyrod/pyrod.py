@@ -103,7 +103,7 @@ class RodTrack:
 
 
 class TemporalRodTracker:
-    def __init__(self, iou_threshold=0.4, min_hits=5, max_misses=3):
+    def __init__(self, iou_threshold=0.4, min_hits=10, max_misses=3):
         self.tracks = []
         self.next_id = 0
         self.iou_threshold = iou_threshold
@@ -268,9 +268,6 @@ class Detector2(DetectorBase):
         # print("@@ peaks", peaks, " // props", props)
 
         y = self.height - GRAPH_Y_OFFSET
-        ys = y - 255
-        yt = ys
-        ytb = yt
 
         rod_width = self.rod_width_px
         min_width = self.rod_w_range_px[0]
@@ -306,12 +303,12 @@ class Detector2(DetectorBase):
                 score = peak_cv * 1000 - abs(delta_center) - abs(delta_width) / 10
 
                 # DEBUG draw
-                ys += 5
+                ys = y - max(min(int(950 - score), 0), 255)
                 cv2.line(self.overlay, (int(left_px), ys), (int(right_px), ys), (255, 0, 0), 3)
                 text = f"{score:4.3f}"
-                yt -= 10
+                ys -= 10
                 cv2.putText(self.overlay, text,
-                    (left_px, yt),           # bottom-left coord
+                    (left_px, ys),           # bottom-left coord
                     cv2.FONT_HERSHEY_DUPLEX,    # font
                     .75,                          # font scale
                     (255, 0, 0),              # color
@@ -326,9 +323,9 @@ class Detector2(DetectorBase):
                 #     delta_center = abs(peak - rod_center)
                 # if delta_center <= 1 * rod_width:
 
-                # # Normalize the width around the peak
-                # left_px = int(peak - rod_width / 2)
-                # right_px = left_px + rod_width
+                # Normalize the width around the peak
+                left_px = int(peak - rod_width / 2)
+                right_px = left_px + rod_width
 
                 # if best is None:
                 #     best = Rod(left_px, right_px, score)
@@ -336,7 +333,6 @@ class Detector2(DetectorBase):
                 # elif score > best.score:
                 #     best = Rod(left_px, right_px, score)
                 #     ytb = yt
-
 
                 candidates.append( Rod(left_px, right_px, score) )
 
@@ -349,10 +345,11 @@ class Detector2(DetectorBase):
             print("@@ best: ", temp_best)
 
             text = f"{best.score:4.3f}"
-            ys = ytb + 5
+            ys = y - max(min(int(950 - best.score), 0), 255)
             cv2.line(self.overlay, (int(best.left), ys), (int(best.right), ys), (0, 0, 255), 3)
+            ys -= 10
             cv2.putText(self.overlay, text,
-                (int(best.left), ytb),           # bottom-left coord
+                (int(best.left), ys),           # bottom-left coord
                 cv2.FONT_HERSHEY_DUPLEX,    # font
                 .75,                          # font scale
                 (0, 0, 255),              # color
