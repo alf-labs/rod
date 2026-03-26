@@ -161,7 +161,7 @@ class TemporalRodTracker:
         return stable_tracks
 
 
-class DetectorBase:
+class ProcessorBase:
     def __init__(self):
         # Overlay is (B,G,R)
         self.overlay = None
@@ -187,7 +187,7 @@ class DetectorBase:
         return frame
 
 
-class Detector2(DetectorBase):
+class Detector(ProcessorBase):
     def __init__(self):
         super().__init__()
         self.last_cv_lu = None
@@ -342,7 +342,7 @@ class Detector2(DetectorBase):
         if temp_best:
             temp_best = temp_best[0]
             best = temp_best.rod
-            print("@@ best: ", temp_best)
+            # print("@@ best: ", temp_best)
 
             text = f"{best.score:4.3f}"
             ys = y - max(min(int(950 - best.score), 0), 255)
@@ -494,22 +494,7 @@ class Main:
         self.mx = 0
         self.my = 0
         self.zoom = 1
-        self.view_org = False
         self.skip_num = 1
-
-    def print_mouse_rgb(self, source, dest):
-        x = self.mx
-        y = self.my
-        z = self.zoom
-        b,g,r = source[y, x]
-        text = f"X: {x}, Y: {y} | R: {r} G: {g} B: {b}"
-        # cv2.rectangle(frame, (x + 10, y - 30), (x + 300, y), (0, 0, 0), -1)
-        cv2.putText(dest, text,
-            (10 * z, 20 * z),           # bottom-left coord
-            cv2.FONT_HERSHEY_SIMPLEX,   # font
-            z / 2,             # font scale
-            (255, 255, 255),            # color
-            z * 2)                  # line thickness
 
     def print_fps(self, loop_s, dest):
         fps = 1/loop_s if loop_s > 0 else 0
@@ -549,12 +534,7 @@ class Main:
                 self.my = y
         cv2.setMouseCallback(WINDOW_TITLE, _mouse_callback)
 
-        loop_s = 0
-        init_once = True
-        frame_count = 0
-        paused = False
-
-        detector = Detector2()
+        processor = Detector()
 
         fourcc = cv2.VideoWriter_fourcc(*'mp4v')
         cap = cv2.VideoCapture(input_path)
@@ -565,7 +545,11 @@ class Main:
             height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
             fps = cap.get(cv2.CAP_PROP_FPS)
             fps_ms = int(1000 / fps)
-            self.view_org = True
+            loop_s = 0
+            init_once = True
+            frame_count = 0
+            paused = False
+            view_org = True
 
             if args.no_video == False:
                 writer = cv2.VideoWriter(output_path, fourcc, fps, (width, height), isColor=True)
@@ -582,8 +566,8 @@ class Main:
                         break
                     frame_count += 1
                     last_frame = frame.copy()
-                    if self.view_org and frame_count == 50:
-                        self.view_org = False
+                    if view_org and frame_count == 50:
+                        view_org = False
 
                 _skip_num = self.skip_num
                 if _skip_num > 1:
@@ -592,27 +576,26 @@ class Main:
 
                 if init_once:
                     print(f"Video size: {width}x{height}")
-                    detector.init_size(width, height)
+                    processor.init_size(width, height)
                     init_once = False
 
-                detector.init_overlay(frame)
-                result = detector.filter(frame)
+                processor.init_overlay(frame)
+                result = processor.filter(frame)
 
-                #self.print_mouse_rgb(frame, detector.overlay)
-                self.print_fps(loop_s, detector.overlay)
+                self.print_fps(loop_s, processor.overlay)
 
-                if self.view_org:
-                    show_frame = detector.combine_overlay(frame)
+                if view_org:
+                    show_frame = processor.combine_overlay(frame)
                 else:
-                    show_frame = detector.combine_overlay(result)
+                    show_frame = processor.combine_overlay(result)
                 cv2.imshow(WINDOW_TITLE, show_frame)
 
                 if writer is not None and not paused:
                     writer.write(show_frame)
 
-                if detector.trigger_pause:
+                if processor.trigger_pause:
                     print("@@ Detector triggered pause. Space to continue.")
-                    detector.trigger_pause = False
+                    processor.trigger_pause = False
                     paused = True
 
                 end_loop_s = time.perf_counter()
@@ -624,7 +607,7 @@ class Main:
                 elif key == ord(' '):
                     paused = not paused
                 elif key == ord('o'):
-                    self.view_org = not self.view_org
+                    view_org = not view_org
                 elif key == ord('s'):
                     self.skip_num = 1 + self.skip_num % 4
                 elif key == ord('1'):
