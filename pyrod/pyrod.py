@@ -87,6 +87,19 @@ class Rod:
     def dupAtFrame(self, frame):
         return Rod(self.left, self.right, self.score, frame)
 
+    def dupInterpolateTo(self, frame, toRod):
+        delta_f = toRod.frame - self.frame
+        if delta_f == 0:    # should not happen
+            return self.dupAtFrame(frame)
+        pb = (frame - self.frame) / delta_f
+        pa = 1 - pb
+        return Rod(
+            self.left  * pa + toRod.left * pb,
+            self.right * pa + toRod.right * pb,
+            round(self.score * pa + toRod.score * pb, 2),
+            frame)
+
+
     def toJson(self):
         return {
             "l": self.left,
@@ -412,6 +425,29 @@ class Detector(ProcessorBase):
         std_intensity = np.std(roi_lu)
         return mean_intensity < mean_threshold and std_intensity < std_threshold, mean_intensity, std_intensity
 
+    def appendFrameRod(self, new_rod):
+        last_rod = None
+        last_idx = 0
+        if self.frame_rods:
+            last_rod = self.frame_rods[-1]
+            last_idx = last_rod.frame
+        new_idx = new_rod.frame
+
+        if new_idx > last_idx + 1:
+            if last_rod is None:
+                # Gap before the first rod. We just fill as-is.
+                for idx in range(last_idx + 1, new_idx):
+                    self.frame_rods.append( new_rod.dupAtFrame(idx) )
+            else:
+                # Otherwise we have a frame gap, which we want to close by interpolation.
+                for idx in range(last_idx + 1, new_idx):
+                    self.frame_rods.append( last_rod.dupInterpolateTo(idx, new_rod) )
+
+        # Append rod for frame new_idx
+        self.frame_rods.append(new_rod)
+
+
+
     def filter(self, frame_index, frame):
         cv_smooth_window = 5
         epsilon = 1e-6
@@ -460,7 +496,7 @@ class Detector(ProcessorBase):
             new_rod = self.find_rod_peaks(cv_peaks)
             if new_rod is not None:
                 self.current_rod = new_rod
-                self.frame_rods.append( new_rod.dupAtFrame(frame_index) )
+                self.appendFrameRod( new_rod.dupAtFrame(frame_index) )
 
         # text = f"threshold {peak_threshold:4.3f}, bt_cv_median {bt_cv_median:4.3f}"
         text = f"threshold {self.last_threshold:4.3f}, bt_mean {bt_mean:4.1f}, bt_std {bt_std:4.1f}"
