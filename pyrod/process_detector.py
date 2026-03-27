@@ -203,30 +203,27 @@ class Detector(ProcessorBase):
         median_luminance = np.median(roi_lu)
         trigger_luminance = (median_luminance + roi_lu[tracked_y, tracked_x]) // 2
         mask = roi_lu > trigger_luminance
-        mask_u8 = mask.astype(np.uint8) * 255
+        mask_f32 = mask.astype(np.float32)
 
         # Erode and dilate
         # Kernel choices: 3x3 typical, or 5x1 (vertical band) to favor vertical features.
         kernel = np.ones((5, 1), np.uint8)
-        cleaned_mask = cv2.morphologyEx(mask_u8, cv2.MORPH_OPEN, kernel, iterations=1)
+        mask_f32 = cv2.morphologyEx(mask_f32, cv2.MORPH_OPEN, kernel, iterations=1)
 
-        return cleaned_mask
+        return mask_f32
 
-    def temporal_smooth_mask(self, mask_u8, history_mask, weight_new):
-        # Convert binary mask to float [0, 1]
-        current_f = mask_u8.astype(np.float32) / 255.0
-
+    def temporal_smooth_mask(self, mask_f32, history_mask, weight_new):
         if history_mask is None:
-            new_history = current_f
+            new_history = mask_f32
         else:
             # Weighted average: history + new evidence
-            new_history = cv2.addWeighted(current_f, weight_new, history_mask, 1.0 - weight_new, 0)
+            new_history = cv2.addWeighted(mask_f32, weight_new, history_mask, 1.0 - weight_new, 0)
 
         # To get a binary mask back, we threshold the 'probability'
         # Only pixels that have been 'white' consistently stay above 0.5
-        binary_out = (new_history > 0.5).astype(np.uint8) * 255
+        mask_u8 = (new_history > 0.75).astype(np.uint8) * 255
 
-        return new_history, binary_out
+        return new_history, mask_u8
 
 
     def draw_mask(self, mask, color, roi_x_left):
@@ -258,11 +255,11 @@ class Detector(ProcessorBase):
         # self.draw_mask(filled_mask, (0, 0, 255), roi_x_left)
         # print("@@ ", frame_index, result)
 
-        mask_u8 = self.find_rod_by_threshold(roi_lu,
+        mask_f32 = self.find_rod_by_threshold(roi_lu,
             rod_x_ctr - roi_x_left,
             self.roi_height - 1)
         self.history_mask, mask_u8 = self.temporal_smooth_mask(
-            mask_u8, self.history_mask, weight_new=0.99)
+            mask_f32, self.history_mask, weight_new=0.25)
         self.draw_mask(mask_u8, (0, 0, 255), roi_x_left)
 
         return cv2.cvtColor(lu, cv2.COLOR_GRAY2BGR)
