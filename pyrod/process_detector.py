@@ -156,27 +156,31 @@ class Detector(ProcessorBase):
         h, w = luminance.shape
         mask = np.zeros((h + 2, w + 2), dtype=np.uint8)
 
-        # For DEBUG
-        trigger_luminance = np.mean(luminance)
-        trigger_luminance = (trigger_luminance + luminance[tracked_y, tracked_x]) // 2
-        filled_mask = luminance > trigger_luminance
+        # # For DEBUG, try a basic binary mask
+        # trigger_luminance = np.mean(luminance)
+        # trigger_luminance = (trigger_luminance + luminance[tracked_y, tracked_x]) // 2
+        # filled_mask = luminance > trigger_luminance
+        tracked_lum = luminance[tracked_y, tracked_x]
+        trigger_lum = int(np.mean(luminance) + tracked_lum) // 2
+        seed_threshold = int(abs(tracked_lum - trigger_lum)) + 5
+        print(f"@@ tracked_lum {tracked_lum} - trigger_lum {trigger_lum} = seed_threshold {seed_threshold}")
 
-        # # Seed point (note: floodFill uses (x, y) format)
-        # seed = (tracked_x, tracked_y)
+        # Seed point (note: floodFill uses (x, y) format)
+        seed = (tracked_x, tracked_y)
 
-        # # Fill the region
-        # cv2.floodFill(
-        #     luminance_3ch,  # Input image (3-channel)
-        #     mask,           # Output mask
-        #     seed,           # Seed point (x, y)
-        #     (0, 0, 0),      # New value (black, but we only care about the mask)
-        #     loDiff=(seed_threshold, seed_threshold, seed_threshold),  # Lower bound for similarity
-        #     upDiff=(seed_threshold, seed_threshold, seed_threshold),  # Upper bound for similarity
-        #     flags=connectivity  # 4 or 8 connectivity
-        # )
+        # Fill the region
+        cv2.floodFill(
+            luminance_3ch,  # Input image (3-channel)
+            mask,           # Output mask
+            seed,           # Seed point (x, y)
+            (255, 255, 255),      # New value (black, but we only care about the mask)
+            # loDiff=(seed_threshold, seed_threshold, seed_threshold),  # Lower bound for similarity
+            upDiff=(seed_threshold, seed_threshold, seed_threshold),  # Upper bound for similarity
+            flags=connectivity  # 4 or 8 connectivity
+        )
 
-        # # Extract the filled region from the mask (remove the 1-pixel border)
-        # filled_mask = mask[1:-1, 1:-1]
+        # Extract the filled region from the mask (remove the 1-pixel border)
+        filled_mask = mask[1:-1, 1:-1]
 
         # Find the bounding box of the filled region
         rows = np.any(filled_mask, axis=1)
@@ -220,7 +224,7 @@ class Detector(ProcessorBase):
             rod_x_ctr - roi_x_left,
             self.roi_height - 1)
         self.draw_mask(filled_mask, (0, 0, 255), roi_x_left)
-        print("@@ ", frame_index, result)
+        # print("@@ ", frame_index, result)
 
         return cv2.cvtColor(lu, cv2.COLOR_GRAY2BGR)
 
