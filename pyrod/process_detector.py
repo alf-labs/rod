@@ -102,7 +102,7 @@ class Detector(ProcessorBase):
         overlay_view = self.overlay[-height:, roi_x_left:roi_x_left + width]
         overlay_view[mask != 0] = color
 
-    def inpaint_rod_biharmonic(self, rgb_image, mask_u8):
+    def inpaint_rod_biharmonic_unused(self, rgb_image, mask_u8):
         # Convert mask to boolean (True where rod is)
         mask_b = mask_u8.astype(bool)
 
@@ -115,6 +115,32 @@ class Detector(ProcessorBase):
         # Convert back to uint8
         inpainted_u8 = (inpainted_f32 * 255).astype(np.uint8)
         return inpainted_u8
+
+    def measure_rod_width(self, mask_u8, tracked_x, tracked_y):
+        row = mask_u8[tracked_y, :]  # Extract the row
+        index255 = np.where(row == 255)[0]  # Find all rod pixels in the row
+        # index0 = np.where(row == 0)[0]  # Find all rod pixels in the row
+        # print(f"@@ idx0: {index0} // idx255: {index255}")
+        left255 = index255[0]
+        right255 = index255[-1]
+        # print(f"@@ {left255} -> {right255} // idx255: {index255}")
+
+        threshold = 1
+        left0 = np.argmax(row[:tracked_x] > threshold)
+        left0 = min(left0, left255)
+        right0 = tracked_x + np.argmax(row[tracked_x:] <= threshold)
+        right0 = max(right255, right0)
+
+        print(f"@@ {left0} >> {left255} == {right255} [{right255 - left255}] >> {right0} [{right0 - left0}]")
+
+        # print(f"@@ left0 {left0} // {row[:tracked_x] > threshold}")
+        # left = max(0, tracker_x - len(row[:tracker_x]) + left)
+
+        # # Find right boundary: first index where row <= threshold (from center to right)
+        # right = tracker_x + np.argmax(row[tracker_x:] <= threshold)
+        # right = min(len(row) - 1, right)
+
+        # return right - left + 1  # Width
 
     def filter(self, frame_index, frame):
         if frame_index >= 0 and frame_index < len(self.frame_rods):
@@ -147,17 +173,20 @@ class Detector(ProcessorBase):
         h_dilate_width = 9
         kernel_h = np.ones((1, h_dilate_width), np.uint8)
         mask_u8 = cv2.dilate(mask_u8, kernel_h, iterations=1)
-        # h_blur_width = 15
-        # mask_u8 = cv2.GaussianBlur(mask_u8, (h_blur_width, 1), 0)
+        h_blur_width = 15
+        mask_u8 = cv2.GaussianBlur(mask_u8, (h_blur_width, 1), 0)
 
         if self.view_mask:
             self.draw_mask(mask_u8, (0, 0, 255), roi_x_left)
 
-        inpainted = cv2.inpaint(roi_rgb, mask_u8, inpaintRadius=5, flags=cv2.INPAINT_TELEA)
+        self.measure_rod_width(mask_u8,
+            rod_x_ctr - roi_x_left,
+            self.roi_height - 1)
+
+        # inpainted = cv2.inpaint(roi_rgb, mask_u8, inpaintRadius=5, flags=cv2.INPAINT_TELEA)
         # inpainted = cv2.inpaint(roi_rgb, mask_u8, inpaintRadius=5, flags=cv2.INPAINT_NS)
         # inpainted = self.inpaint_rod_biharmonic(roi_rgb, mask_u8)
-
-        frame[-self.roi_height:, roi_x_left:roi_x_right] = inpainted
+        # frame[-self.roi_height:, roi_x_left:roi_x_right] = inpainted
 
         if self.view_mask:
             return cv2.cvtColor(lu, cv2.COLOR_GRAY2BGR)
