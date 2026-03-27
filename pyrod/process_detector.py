@@ -7,7 +7,7 @@ from processor import ProcessorBase
 from rod import Rod
 
 ROD_WIDTH = 35/1280
-ROI_WIDTH = 8 * ROD_WIDTH
+ROI_WIDTH = 4 * ROD_WIDTH
 ROI_HEIGHT = 5/12
 
 
@@ -131,16 +131,44 @@ class Detector(ProcessorBase):
         right0 = tracked_x + np.argmax(row[tracked_x:] <= threshold)
         right0 = max(right255, right0)
 
-        print(f"@@ {left0} >> {left255} == {right255} [{right255 - left255}] >> {right0} [{right0 - left0}]")
+        # print(f"@@ {left0} >> {left255} == {right255} [{right255 - left255}] >> {right0} [{right0 - left0}]")
+        # TBD we could detect when the width becomes suddenly much larger and contain it
+        # using an historical center tracker?
 
-        # print(f"@@ left0 {left0} // {row[:tracked_x] > threshold}")
-        # left = max(0, tracker_x - len(row[:tracker_x]) + left)
+        return left0, right0
 
-        # # Find right boundary: first index where row <= threshold (from center to right)
-        # right = tracker_x + np.argmax(row[tracker_x:] <= threshold)
-        # right = min(len(row) - 1, right)
+    def inpaint_dual_mirror(self, wide_roi_rgb, wide_mask_u8, left0, right0):
+        h, w, _ = wide_roi_rgb.shape
 
-        # return right - left + 1  # Width
+        # 1. Normalize Mask to a 0.0-1.0 float factor
+        # Expand dims to (H, W, 1) so it multiplies across R, G, and B channels
+        alpha = wide_mask_u8.astype(np.float32) / 255.0
+        alpha = np.expand_dims(alpha, axis=-1)
+
+        # 2. Create the Mirrored X-Coordinate Maps
+        # x is [0, 1, 2, ..., W-1]
+        x = np.arange(w)
+
+        # Scalar version (Rod is perfectly vertical)
+        idx_l = np.clip(2 * left0 - x, 0, w - 1).astype(np.int32)
+        idx_r = np.clip(2 * right0 - x, 0, w - 1).astype(np.int32)
+
+        # Sample mirrored images
+        img_l = wide_roi_rgb[:, idx_l, :]
+        img_r = wide_roi_rgb[:, idx_r, :]
+
+        # 3. Create the Premultiplied Overlays
+        # We use 0.5 * alpha to ensure the mix totals 1.0 within the rod area
+        left_overlay = img_l.astype(np.float32) * (alpha * 0.5)
+        right_overlay = img_r.astype(np.float32) * (alpha * 0.5)
+
+        # 4. Extract the Background (Original frame minus the rod)
+        background = wide_roi_rgb.astype(np.float32) * (1.0 - alpha)
+
+        # 5. Final Assembly: Background + Mixed Mirrored Content
+        # Using np.clip to ensure no rounding errors push us past 255
+        result = background + left_overlay + right_overlay
+        return np.clip(result, 0, 255).astype(np.uint8)
 
     def filter(self, frame_index, frame):
         if frame_index >= 0 and frame_index < len(self.frame_rods):
@@ -154,39 +182,57 @@ class Detector(ProcessorBase):
         lab = cv2.cvtColor(frame, cv2.COLOR_BGR2LAB)
         lu = lab[:, :, 0]
 
+        # -- Phase 1
+        # The rod mask is computed on a ROI of ROI_WIDTH, centered on the rod tracker x.
+        # This helps with the temporal smooth as a ROI is a "view" centered on the rod
+        # no matter where it is located in the image horizontally.
+
         rod_x_ctr = int(rod.center())
         roi_x_left, roi_lu, contrast_lu = self.extract_roi(lu, rod_x_ctr)
-        self.draw_roi_bounds(roi_x_left, rod_x_ctr)
+        if self.view_mask:
+            self.draw_roi_bounds(roi_x_left, rod_x_ctr)
 
+        roi_height = self.roi_height
         mask_f32 = self.find_rod_by_threshold(roi_lu,
             rod_x_ctr - roi_x_left,
-            self.roi_height - 1)
+            roi_height - 1)
         self.history_mask, mask_u8 = self.temporal_smooth_mask(
             mask_f32, self.history_mask, weight_new=0.25)
         mask_u8 = self.keep_contiguous_rod(mask_u8,
             rod_x_ctr - roi_x_left,
-            self.roi_height - 1)
+            roi_height - 1)
 
-        roi_x_right = roi_x_left + self.roi_width
-        roi_rgb = frame[-self.roi_height:, roi_x_left:roi_x_right]
+        # TBD we could detect (and skip) spurious invalida masks based
+        # on pixel count jumping too high.
+
+        # -- Phase 2
+        # Starting form here, the ROI becomes the entire width of the image
+        # and the bottom ROI height rows.
+        wide_w = self.width
+        wide_mask_u8 = np.zeros((roi_height, wide_w), np.uint8)
+        wide_mask_u8[:, roi_x_left:roi_x_left + self.roi_width] = mask_u8
+
+        wide_roi_rgb = frame[-roi_height:, :]
 
         h_dilate_width = 9
         kernel_h = np.ones((1, h_dilate_width), np.uint8)
-        mask_u8 = cv2.dilate(mask_u8, kernel_h, iterations=1)
+        wide_mask_u8 = cv2.dilate(wide_mask_u8, kernel_h, iterations=1)
         h_blur_width = 15
-        mask_u8 = cv2.GaussianBlur(mask_u8, (h_blur_width, 1), 0)
+        wide_mask_u8 = cv2.GaussianBlur(wide_mask_u8, (h_blur_width, 1), 0)
 
         if self.view_mask:
-            self.draw_mask(mask_u8, (0, 0, 255), roi_x_left)
+            self.draw_mask(wide_mask_u8, (0, 0, 255), 0)
 
-        self.measure_rod_width(mask_u8,
-            rod_x_ctr - roi_x_left,
-            self.roi_height - 1)
+        left0, right0 = self.measure_rod_width(wide_mask_u8,
+            rod_x_ctr,
+            roi_height - 1)
 
-        # inpainted = cv2.inpaint(roi_rgb, mask_u8, inpaintRadius=5, flags=cv2.INPAINT_TELEA)
-        # inpainted = cv2.inpaint(roi_rgb, mask_u8, inpaintRadius=5, flags=cv2.INPAINT_NS)
-        # inpainted = self.inpaint_rod_biharmonic(roi_rgb, mask_u8)
-        # frame[-self.roi_height:, roi_x_left:roi_x_right] = inpainted
+        # inpainted = cv2.inpaint(roi_rgb, wide_mask_u8, inpaintRadius=5, flags=cv2.INPAINT_TELEA)
+        # inpainted = cv2.inpaint(roi_rgb, wide_mask_u8, inpaintRadius=5, flags=cv2.INPAINT_NS)
+        # inpainted = self.inpaint_rod_biharmonic(roi_rgb, wide_mask_u8)
+
+        inpainted = self.inpaint_dual_mirror(wide_roi_rgb, wide_mask_u8, left0, right0)
+        frame[-roi_height:, :] = inpainted
 
         if self.view_mask:
             return cv2.cvtColor(lu, cv2.COLOR_GRAY2BGR)
