@@ -225,6 +225,33 @@ class Detector(ProcessorBase):
 
         return new_history, mask_u8
 
+    def keep_contiguous_rod(self, mask_u8, seed_x, seed_y):
+        h, w = mask_u8.shape
+        filled_mask = np.zeros((h, w), dtype=np.uint8)
+
+        # # 2. Safety check: Is the tracker point actually on a white pixel?
+        # # If the tracker is on a black pixel (due to a tiny gap), floodFill won't start.
+        # if mask[seed_y, seed_x] == 0:
+        #     # Optional: Search in a tiny 3x3 neighborhood for the nearest white pixel
+        #     return mask # Or handle as a "lost tracking" state
+
+        # floodfill modifies the source; that's fine as we're not keeping it anyway
+        # -- not needed here -- temp_mask = mask.copy()
+        # floodFill(image, mask, seedPoint, newVal)
+        # Note: newVal=255 means we turn the rod white on our temp_mask
+        # cv2.floodFill(mask_u8, None, (seed_x, seed_y), 255)
+
+        # 4. The 'Magic Trick': Bitwise Comparison
+        # After floodFill, the connected rod is still 255, but we need to isolate
+        # what changed. A simpler way: use the 'mask' parameter of floodFill
+        # or just use the following logic:
+
+        # Create an empty mask for the result
+        just_the_rod = np.zeros((h + 2, w + 2), np.uint8) # floodFill needs +2 size
+        cv2.floodFill(mask_u8, just_the_rod, (seed_x, seed_y), 255)
+
+        # The 'just_the_rod' mask now contains the filled area (at indices 1:-1)
+        return just_the_rod[1:-1, 1:-1] * 255
 
     def draw_mask(self, mask, color, roi_x_left):
         height, width = mask.shape
@@ -260,6 +287,9 @@ class Detector(ProcessorBase):
             self.roi_height - 1)
         self.history_mask, mask_u8 = self.temporal_smooth_mask(
             mask_f32, self.history_mask, weight_new=0.25)
+        mask_u8 = self.keep_contiguous_rod(mask_u8,
+            rod_x_ctr - roi_x_left,
+            self.roi_height - 1)
         self.draw_mask(mask_u8, (0, 0, 255), roi_x_left)
 
         return cv2.cvtColor(lu, cv2.COLOR_GRAY2BGR)
