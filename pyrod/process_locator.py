@@ -21,6 +21,7 @@ class LocatorBase(ProcessorBase):
     def __init__(self):
         super().__init__()
         self.frame_rods = []
+        self.frame_tunnel_metric = {}
 
     def init_size(self, width, height):
         super().init_size(width, height)
@@ -40,13 +41,21 @@ class LocatorBase(ProcessorBase):
             if last_rod is None:
                 # Gap before the first rod. We just fill as-is.
                 for idx in range(last_idx + 1, new_idx):
-                    self.frame_rods.append( new_rod.dupAtFrame(idx) )
+                    rod = new_rod.dupAtFrame(idx)
+                    if idx in self.frame_tunnel_metric:
+                        rod.tunnel_metric = self.frame_tunnel_metric[idx]
+                    self.frame_rods.append(rod)
             else:
                 # Otherwise we have a frame gap, which we want to close by interpolation.
                 for idx in range(last_idx + 1, new_idx):
-                    self.frame_rods.append( last_rod.dupInterpolateTo(idx, new_rod) )
+                    rod = last_rod.dupInterpolateTo(idx, new_rod)
+                    if idx in self.frame_tunnel_metric:
+                        rod.tunnel_metric = self.frame_tunnel_metric[idx]
+                    self.frame_rods.append(rod)
 
         # Append rod for frame new_idx
+        if new_idx in self.frame_tunnel_metric:
+            new_rod.tunnel_metric = self.frame_tunnel_metric[new_idx]
         self.frame_rods.append(new_rod)
 
     def draw_rod(self, rod):
@@ -76,7 +85,7 @@ class LocatorGen(LocatorBase):
         self.current_rod = None
         self.clahe = cv2.createCLAHE(clipLimit=1.5, tileGridSize=(8, 8))
         cv_smooth_window = 5
-        self.cv_smmoth_kernel = np.ones(cv_smooth_window)/cv_smooth_window
+        self.cv_smooth_kernel = np.ones(cv_smooth_window)/cv_smooth_window
         self.temporal_tracker = TemporalRodTracker(
             iou_threshold=TRACKER_IOU_PCT,
             min_hits=TRACKER_MIN_HITS,
@@ -213,7 +222,7 @@ class LocatorGen(LocatorBase):
             temp_best = temp_best[0]
             best_id = temp_best.id
             best = temp_best.rod
-            print(f"@@ Best: {temp_best}")
+            # print(f"@@ Best: {temp_best}")
 
         # DEBUG draw
         y = self.height - GRAPH_Y_OFFSET
@@ -292,7 +301,13 @@ class LocatorGen(LocatorBase):
     def is_frame_too_dark(self, roi_lu, mean_threshold=15, std_threshold=15):
         mean_intensity = np.mean(roi_lu)
         std_intensity = np.std(roi_lu)
-        return mean_intensity < mean_threshold and std_intensity < std_threshold, mean_intensity, std_intensity
+
+        # mean_norm = min(mean_intensity / mean_threshold, 1.0)
+        # std_norm = min(std_intensity / std_threshold, 1.0)
+        mean_norm = mean_intensity / mean_threshold
+        std_norm = std_intensity / std_threshold
+        tunnel_metric = min(mean_norm, std_norm)
+        return tunnel_metric < 1.0, tunnel_metric
 
     def filter(self, frame_index, frame):
         epsilon = 1e-6
@@ -316,7 +331,8 @@ class LocatorGen(LocatorBase):
 
         # We can use the original bottom CV to detect tunnels and disable rod detection.
         # The mean/std plumets in tunnels.
-        is_dark, bt_mean, bt_std = self.is_frame_too_dark(bottom_lu[:, roi_q:-roi_q])
+        is_dark, tunnel_metric = self.is_frame_too_dark(bottom_lu[:, roi_q:-roi_q])
+        self.frame_tunnel_metric[frame_index] = tunnel_metric
         if not is_dark:
             # Compute and smooth the CV vector
             cv_lu = self.get_cv_vectorized(contrast_lu)
@@ -341,10 +357,10 @@ class LocatorGen(LocatorBase):
             new_rod = self.find_rod_peaks(cv_peaks)
             if new_rod is not None:
                 self.current_rod = new_rod
-                self.append_frame_rod( new_rod.dupAtFrame(frame_index) )
+                self.append_frame_rod( new_rod.dupAtFrame(frame_index, tunnel_metric) )
 
         # text = f"threshold {peak_threshold:4.3f}, bt_cv_median {bt_cv_median:4.3f}"
-        text = f"threshold {self.last_threshold:4.3f}, bt_mean {bt_mean:4.1f}, bt_std {bt_std:4.1f}"
+        text = f"threshold: {self.last_threshold:4.3f}, tunnel: {tunnel_metric:4.3f}"
         cv2.putText(self.overlay, text,
             (10, 60),           # bottom-left coord
             cv2.FONT_HERSHEY_DUPLEX,    # font

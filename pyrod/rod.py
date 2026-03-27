@@ -1,10 +1,11 @@
 
 class Rod:
-    def __init__(self, left, right, score, frame=0):
+    def __init__(self, left, right, score, frame=0, tunnel_metric=1.0):
         self.left = left
         self.right = right
         self.score = score
         self.frame = frame
+        self.tunnel_metric = tunnel_metric
 
     def merge(self, other_rod, weight=0.75):
         wa = weight
@@ -13,6 +14,7 @@ class Rod:
         self.right = self.right * wa + other_rod.right * wb
         self.score = other_rod.score
         self.frame = other_rod.frame
+        self.tunnel_metric = other_rod.tunnel_metric
 
     def center(self):
         return (self.left + self.right) / 2
@@ -21,12 +23,16 @@ class Rod:
         return self.right - self.left
 
     def __repr__(self):
-        return f"Rod( {self.left:.3f} -> {self.right:.3f} ; width {self.width():.3f} ; score {self.score:.3f} )"
+        return f"Rod( {self.left:.3f} -> {self.right:.3f} ; width {self.width():.3f} ; score {self.score:.3f} ; tunnel {self.tunnel_metric:.3f} )"
 
-    def dupAtFrame(self, frame):
-        return Rod(self.left, self.right, self.score, frame)
+    def dupAtFrame(self, frame, tunnel_metric=None):
+        if tunnel_metric is None:
+            tunnel_metric = self.tunnel_metric
+        return Rod(self.left, self.right, self.score, frame, tunnel_metric)
 
-    def dupInterpolateTo(self, frame, toRod):
+    def dupInterpolateTo(self, frame, toRod, tunnel_metric=None):
+        if tunnel_metric is None:
+            tunnel_metric = self.tunnel_metric
         delta_f = toRod.frame - self.frame
         if delta_f == 0:    # should not happen
             return self.dupAtFrame(frame)
@@ -36,7 +42,8 @@ class Rod:
             self.left  * pa + toRod.left * pb,
             self.right * pa + toRod.right * pb,
             round(self.score * pa + toRod.score * pb, 2),
-            frame)
+            frame,
+            tunnel_metric)
 
     def toJson(self):
         return {
@@ -44,6 +51,7 @@ class Rod:
             "r": self.right,
             "s": self.score,
             "f": self.frame,
+            "t": self.tunnel_metric,
         }
 
     @staticmethod
@@ -52,7 +60,7 @@ class Rod:
         if not isinstance(params, dict):
             raise ValueError("[Rod.fromJson] params must be a dict")
 
-        required_keys = {"l", "r", "s", "f"}
+        required_keys = {"l", "r", "s", "f", "t"}
         if not required_keys.issubset(params.keys()):
             raise ValueError(f"[Rod.fromJson] params must contain keys: {required_keys}")
 
@@ -65,4 +73,5 @@ class Rod:
             params["r"],
             params["s"],
             params["f"],
+            params["t"],
         )
