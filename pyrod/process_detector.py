@@ -16,6 +16,7 @@ class Detector(ProcessorBase):
         super().__init__()
         self.frame_rods = locator.frame_rods
         self.clahe = cv2.createCLAHE(clipLimit=1.5, tileGridSize=(8, 8))
+        self.history_mask = None
 
     def init_size(self, width, height):
         super().init_size(width, height)
@@ -60,7 +61,7 @@ class Detector(ProcessorBase):
             color=(0, 255, 0),
             thickness=-1)
 
-    def track_rod_upward(self, roi_lu, start_x, start_y, target_width, search_margin):
+    def track_rod_upward_unused(self, roi_lu, start_x, start_y, target_width, search_margin):
         """
         Tracks a bending rod from bottom to top using local CV valleys.
         """
@@ -120,7 +121,7 @@ class Detector(ProcessorBase):
         print("@@ path", path)
         return path
 
-    def draw_path(self, path, roi_x_left):
+    def draw_path_unused(self, path, roi_x_left):
         y_offset = self.height - self.roi_height
         for p in path:
             x = int(p["x"] + roi_x_left)
@@ -135,7 +136,7 @@ class Detector(ProcessorBase):
                 color=(0, 255, 0),
                 thickness=-1)
 
-    def find_rod_boundaries_floodfill(self, luminance, tracked_x, tracked_y, seed_threshold=20, connectivity=4):
+    def find_rod_boundaries_floodfill_unused(self, luminance, tracked_x, tracked_y, seed_threshold=20, connectivity=4):
         """
         Find the rod's boundaries using flood fill.
 
@@ -197,10 +198,41 @@ class Detector(ProcessorBase):
             "right": right_x,
         }, filled_mask
 
+    def find_rod_by_threshold(self, roi_lu, tracked_x, tracked_y):
+        # Try a basic binary mask
+        median_luminance = np.median(roi_lu)
+        trigger_luminance = (median_luminance + roi_lu[tracked_y, tracked_x]) // 2
+        mask = roi_lu > trigger_luminance
+        mask_u8 = mask.astype(np.uint8) * 255
+
+        # Erode and dilate
+        # Kernel choices: 3x3 typical, or 5x1 (vertical band) to favor vertical features.
+        kernel = np.ones((5, 1), np.uint8)
+        cleaned_mask = cv2.morphologyEx(mask_u8, cv2.MORPH_OPEN, kernel, iterations=1)
+
+        return cleaned_mask
+
+    def temporal_smooth_mask(self, mask_u8, history_mask, weight_new):
+        # Convert binary mask to float [0, 1]
+        current_f = mask_u8.astype(np.float32) / 255.0
+
+        if history_mask is None:
+            new_history = current_f
+        else:
+            # Weighted average: history + new evidence
+            new_history = cv2.addWeighted(current_f, weight_new, history_mask, 1.0 - weight_new, 0)
+
+        # To get a binary mask back, we threshold the 'probability'
+        # Only pixels that have been 'white' consistently stay above 0.5
+        binary_out = (new_history > 0.5).astype(np.uint8) * 255
+
+        return new_history, binary_out
+
+
     def draw_mask(self, mask, color, roi_x_left):
         height, width = mask.shape
         overlay_view = self.overlay[-height:, roi_x_left:roi_x_left + width]
-        overlay_view[mask != 1] = color
+        overlay_view[mask != 0] = color
 
     def filter(self, frame_index, frame):
         if frame_index >= 0 and frame_index < len(self.frame_rods):
@@ -220,11 +252,18 @@ class Detector(ProcessorBase):
         #     search_margin=self.rod_width_px / 2)
         # self.draw_path(path, roi_x_left)
 
-        result, filled_mask = self.find_rod_boundaries_floodfill(roi_lu,
+        # result, filled_mask = self.find_rod_boundaries_floodfill(roi_lu,
+        #     rod_x_ctr - roi_x_left,
+        #     self.roi_height - 1)
+        # self.draw_mask(filled_mask, (0, 0, 255), roi_x_left)
+        # print("@@ ", frame_index, result)
+
+        mask_u8 = self.find_rod_by_threshold(roi_lu,
             rod_x_ctr - roi_x_left,
             self.roi_height - 1)
-        self.draw_mask(filled_mask, (0, 0, 255), roi_x_left)
-        # print("@@ ", frame_index, result)
+        self.history_mask, mask_u8 = self.temporal_smooth_mask(
+            mask_u8, self.history_mask, weight_new=0.99)
+        self.draw_mask(mask_u8, (0, 0, 255), roi_x_left)
 
         return cv2.cvtColor(lu, cv2.COLOR_GRAY2BGR)
 

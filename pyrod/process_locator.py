@@ -75,6 +75,8 @@ class LocatorGen(LocatorBase):
         self.last_threshold = 0
         self.current_rod = None
         self.clahe = cv2.createCLAHE(clipLimit=1.5, tileGridSize=(8, 8))
+        cv_smooth_window = 5
+        self.cv_smmoth_kernel = np.ones(cv_smooth_window)/cv_smooth_window
         self.temporal_tracker = TemporalRodTracker(
             iou_threshold=TRACKER_IOU_PCT,
             min_hits=TRACKER_MIN_HITS,
@@ -293,7 +295,6 @@ class LocatorGen(LocatorBase):
         return mean_intensity < mean_threshold and std_intensity < std_threshold, mean_intensity, std_intensity
 
     def filter(self, frame_index, frame):
-        cv_smooth_window = 5
         epsilon = 1e-6
         roi_q = self.roi_q
         bt_cv_tuunel_threshold = 0.003
@@ -319,7 +320,7 @@ class LocatorGen(LocatorBase):
         if not is_dark:
             # Compute and smooth the CV vector
             cv_lu = self.get_cv_vectorized(contrast_lu)
-            cv_lu = np.convolve(cv_lu, np.ones(cv_smooth_window)/cv_smooth_window, mode="same")
+            cv_lu = np.convolve(cv_lu, self.cv_smooth_kernel, mode="same")
 
             # Adaptive thresholding
             cv_lu_inv = 1 - cv_lu
