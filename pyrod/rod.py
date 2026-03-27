@@ -25,6 +25,9 @@ class Rod:
     def __repr__(self):
         return f"Rod( {self.left:.3f} -> {self.right:.3f} ; width {self.width():.3f} ; score {self.score:.3f} ; tunnel {self.tunnel_metric:.3f} )"
 
+    def isTunnel(self):
+        return self.tunnel_metric < 1.0
+
     def dupAtFrame(self, frame, tunnel_metric=None):
         if tunnel_metric is None:
             tunnel_metric = self.tunnel_metric

@@ -26,8 +26,8 @@ class LocatorBase(ProcessorBase):
     def init_size(self, width, height):
         super().init_size(width, height)
 
-    def init_overlay(self, frame):
-        super().init_overlay(frame)
+    def init_overlay(self, frame, view_mask):
+        super().init_overlay(frame, view_mask)
 
     def append_frame_rod(self, new_rod):
         last_rod = None
@@ -390,8 +390,8 @@ class LocatorRdr(LocatorBase):
     def init_size(self, width, height):
         super().init_size(width, height)
 
-    def init_overlay(self, frame):
-        super().init_overlay(frame)
+    def init_overlay(self, frame, view_mask):
+        super().init_overlay(frame, view_mask)
 
     def readJson(self, filename):
         print(f"@@ LocatorRdr JSON input read {filename}")

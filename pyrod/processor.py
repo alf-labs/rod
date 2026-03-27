@@ -5,6 +5,7 @@ class ProcessorBase:
     def __init__(self):
         # Overlay is (B,G,R)
         self.overlay = None
+        self.view_mask = False
         self.trigger_pause = False
         self.next_processor_requested = False
 
@@ -13,7 +14,8 @@ class ProcessorBase:
         self.width = width
         self.height = height
 
-    def init_overlay(self, frame):
+    def init_overlay(self, frame, view_mask):
+        self.view_mask = view_mask
         if self.overlay is None:
             self.overlay = np.zeros_like(frame)
         else:

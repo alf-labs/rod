@@ -16,12 +16,13 @@ try:
     import numpy as np
     import imutils
     import scipy
+    import skimage
     from flask import Flask, render_template, Response, request, jsonify
     from process_locator import LocatorGen, LocatorRdr
     from process_detector import Detector
 except ModuleNotFoundError as e:
     print(f"ERROR: Missing library. {e}")
-    print( "To fix: $ pip install opencv-python numpy scipy imutils flask")
+    print( "To fix: $ pip install opencv-python numpy scipy scikit-image imutils flask")
     print(f"or    : $ python {sys.argv[0]}")
     exit(1)
 
@@ -42,6 +43,7 @@ class Main:
         self.skip_num = 1
         self.pause = False
         self.view_org = False
+        self.view_mask = False
         self.allow_export = False
         self.quit_requested = False
         self.processors = []
@@ -90,6 +92,8 @@ class Main:
             self.paused = not self.paused
         elif key == ord('o'):
             self.view_org = not self.view_org
+        elif key == ord('m'):
+            self.view_mask = not self.view_mask
         elif key == ord('s'):
             self.skip_num = 1 + self.skip_num % 4
         elif key == ord('1'):
@@ -208,7 +212,7 @@ class Main:
                     processor.init_size(width, height)
                     init_once = False
 
-                processor.init_overlay(frame)
+                processor.init_overlay(frame, self.view_mask)
                 result = processor.filter(frame_count, frame)
 
                 self.print_fps(loop_s, processor.overlay)
