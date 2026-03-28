@@ -69,6 +69,7 @@ class Main:
         parser.add_argument("-n", "--no-video", action="store_true", help="Skip Video Output")
         parser.add_argument("-l", "--locator", default="", help="Locator JSON data to read back")
         parser.add_argument("-0", "--locator-only", action="store_true", help="Only run locator process")
+        parser.add_argument("-c", "--crop", action="store_true", help="Center Crop Large Video to 1920x1080")
         args = parser.parse_args()
         self.args = args
 
@@ -150,8 +151,8 @@ class Main:
         writer = None
         try:
             # Get input video properties
-            width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-            height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+            vid_width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+            vid_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
             fps = cap.get(cv2.CAP_PROP_FPS)
             fps_ms = int(1000 / fps)
             loop_s = 0
@@ -160,6 +161,19 @@ class Main:
             processor = None
             self.paused = False
             self.view_org = True
+
+            do_crop = False
+            width = vid_width
+            height = vid_height
+            if args.crop:
+                do_crop = True
+                width = min(1920, vid_width)
+                height = min(1080, vid_height)
+                crop_x1 = (vid_width - width) // 2
+                crop_y1 = (vid_height - height) // 2
+                crop_x2 = crop_x1 + width
+                crop_y2 = crop_y1 + height
+
 
             # Processor #0
             processor_idx = 0
@@ -206,6 +220,8 @@ class Main:
                         if not ret or processor is None:
                             print(f"@@ capture loop ended")
                             break
+                    if do_crop:
+                        frame = frame[crop_y1:crop_y2, crop_x1:crop_x2]
                     frame_count += 1
                     last_frame = frame.copy()
                     if self.view_org and frame_count == 50:
@@ -217,6 +233,9 @@ class Main:
                         continue
 
                 if init_once:
+                    h, w, _ = frame.shape
+                    assert h == height
+                    assert w == width
                     print(f"Init Processor {processor_idx}, Video size: {width}x{height}")
                     processor.init_size(width, height)
                     init_once = False
