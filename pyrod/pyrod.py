@@ -41,7 +41,8 @@ class Main:
         self.my = 0
         self.zoom = 1
         self.skip_num = 1
-        self.pause = False
+        self.paused = False
+        self.single_frame = False
         self.view_org = False
         self.view_mask = False
         self.allow_export = False
@@ -49,10 +50,10 @@ class Main:
         self.processors = []
         self.export_path = {}
 
-    def print_fps(self, loop_s, dest):
+    def print_fps(self, loop_s, frame_count, dest):
         fps = 1/loop_s if loop_s > 0 else 0
         ms = int(loop_s * 1000)
-        text = f"{self.mx:03d} x, {ms} ms, {fps:.2f} fps"
+        text = f"[{frame_count:04d}] {self.mx:03d} x, {ms} ms, {fps:.2f} fps"
         z = self.zoom
         cv2.putText(dest, text,
             (10 * z, 30 * z),           # bottom-left coord
@@ -86,13 +87,17 @@ class Main:
         return args
 
     def parseKeys(self, wait_ms=1):
+        if self.paused:
+            wait_ms = 300
         key = cv2.waitKey(wait_ms) & 0xFF
         if key == ord('q'):
             self.quit_requested = True
         elif key == ord(' '):
+            self.single_frame = False
             self.paused = not self.paused
-            while self.paused and not self.quit_requested:
-                self.parseKeys(100)
+        elif key == ord('e'):
+            self.single_frame = True
+            self.paused = False
         elif key == ord('o'):
             self.view_org = not self.view_org
         elif key == ord('m'):
@@ -216,10 +221,11 @@ class Main:
                     processor.init_size(width, height)
                     init_once = False
 
-                processor.init_overlay(frame, self.view_mask)
-                result = processor.filter(frame_count, frame)
+                if not self.paused:
+                    processor.init_overlay(frame, self.view_mask)
+                    result = processor.filter(frame_count, frame)
 
-                self.print_fps(loop_s, processor.overlay)
+                    self.print_fps(loop_s, frame_count, processor.overlay)
 
                 if self.view_org:
                     show_frame = processor.combine_overlay(frame)
@@ -227,13 +233,16 @@ class Main:
                     show_frame = processor.combine_overlay(result)
                 cv2.imshow(WINDOW_TITLE, show_frame)
 
+                if self.single_frame:
+                    self.paused = True
+
                 if self.allow_export and not self.paused:
                     writer.write(show_frame)
 
                 if processor.trigger_pause:
                     print("@@ Detector triggered pause. Space to continue.")
                     processor.trigger_pause = False
-                    paused = True
+                    self.paused = True
 
                 end_loop_s = time.perf_counter()
                 loop_s = end_loop_s - start_loop_s
