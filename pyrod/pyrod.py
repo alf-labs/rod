@@ -67,6 +67,7 @@ class Main:
         parser.add_argument("-o", "--output", default=OUT_VIDEO_FILE_PATH, help="Output video")
         parser.add_argument("-n", "--no-video", action="store_true", help="Skip Video Output")
         parser.add_argument("-l", "--locator", default="", help="Locator JSON data to read back")
+        parser.add_argument("-0", "--locator-only", action="store_true", help="Only run locator process")
         args = parser.parse_args()
         self.args = args
 
@@ -84,12 +85,14 @@ class Main:
         print("Output:", self.output_path, "(disabled by -n)" if args.no_video else "")
         return args
 
-    def parseKeys(self):
-        key = cv2.waitKey(1) & 0xFF
+    def parseKeys(self, wait_ms=1):
+        key = cv2.waitKey(wait_ms) & 0xFF
         if key == ord('q'):
             self.quit_requested = True
         elif key == ord(' '):
             self.paused = not self.paused
+            while self.paused and not self.quit_requested:
+                self.parseKeys(100)
         elif key == ord('o'):
             self.view_org = not self.view_org
         elif key == ord('m'):
@@ -163,8 +166,9 @@ class Main:
                 self.processors.append( LocatorGen() )
                 self.export_path[0] = self.locator_path
             processor = self.processors[0]
-            # Processor #1
-            self.processors.append( Detector(processor) )
+            if not args.locator_only:
+                # Processor #1
+                self.processors.append( Detector(processor) )
             print(f"@@ Start with processor #{processor_idx}: {processor}")
 
             if args.no_video == False:
