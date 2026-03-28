@@ -279,6 +279,8 @@ class Main:
                     self.paused = True
 
                 if self.allow_export and not self.paused:
+                    if do_downscale == 2:
+                        show_frame = cv2.resize(show_frame, (0,0), fx=2, fy=2, interpolation=cv2.INTER_NEAREST)
                     writer.write(show_frame)
 
                 if processor.trigger_pause:
