@@ -47,13 +47,15 @@ class Main:
         self.view_mask = False
         self.allow_export = False
         self.quit_requested = False
+        self.start_frame = 0
+        self.end_loop_frame = 0
         self.processors = []
         self.export_path = {}
 
     def print_fps(self, loop_s, frame_count, dest):
         fps = 1/loop_s if loop_s > 0 else 0
         ms = int(loop_s * 1000)
-        text = f"[{frame_count:04d}] {self.mx:03d} x, {ms} ms, {fps:.2f} fps"
+        text = f"[{frame_count:05d}] {self.mx:03d} x, {ms} ms, {fps:.2f} fps"
         z = self.zoom
         cv2.putText(dest, text,
             (10 * z, 30 * z),           # bottom-left coord
@@ -70,6 +72,8 @@ class Main:
         parser.add_argument("-l", "--locator", default="", help="Locator JSON data to read back")
         parser.add_argument("-0", "--locator-only", action="store_true", help="Only run locator process")
         parser.add_argument("-c", "--crop", action="store_true", help="Center Crop Large Video to 1920x1080")
+        parser.add_argument("-s", "--start", default="0", help="Start frame")
+        parser.add_argument("-e", "--end", default="0", help="End/loop frame")
         args = parser.parse_args()
         self.args = args
 
@@ -85,6 +89,10 @@ class Main:
             self.locator_path = self.output_path.replace(".mp4", "") + ".0.json"
         print("Input:", self.input_path)
         print("Output:", self.output_path, "(disabled by -n)" if args.no_video else "")
+        if args.start.isdigit():
+            self.start_frame = int(args.start)
+        if args.end.isdigit():
+            self.end_loop_frame = int(args.end)
         return args
 
     def parseKeys(self, wait_ms=1):
@@ -154,10 +162,10 @@ class Main:
             vid_width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
             vid_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
             fps = cap.get(cv2.CAP_PROP_FPS)
+            print(f"@@ Opening input {vid_width}x{vid_height}@{fps} fps")
             fps_ms = int(1000 / fps)
             loop_s = 0
             init_once = True
-            frame_count = 0
             processor = None
             self.paused = False
             self.view_org = True
@@ -196,33 +204,40 @@ class Main:
                 print(f"@@ Writing {width}x{height}@{fps} fps to", self.output_path)
 
             last_frame = None
+            end_reached = False
+            frame_count = self.start_frame
             print(f"@@ Reader cap isOpened: {cap.isOpened()}, {width}x{height}@{fps} fps")
+            cap.set(cv2.CAP_PROP_POS_FRAMES, self.start_frame)
             while cap.isOpened() and not self.quit_requested:
+                self.parseKeys()
                 start_loop_s = time.perf_counter()
                 if self.paused:
                     frame = last_frame.copy()
                 else:
+                    if end_reached:
+                        print(f"@@ capture loop next")
+                        end_reached = False
+                        processor, processor_idx = self.next_processor(processor, processor_idx)
+                        if processor is not None:
+                            init_once = True
+                            frame_count = self.start_frame
+                            self.paused = False
+                            self.view_org = True
+                        else:
+                            print(f"@@ capture loop ended")
+                            break
                     ret, frame = cap.read()
                     if not ret or processor.next_processor_requested:
                         # If video recorded file ends, loop back to the beginning
                         print(f"@@ capture end reached?")
-                        cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
-                        # Try to read again
-                        ret, frame = cap.read()
-                        if ret:
-                            print(f"@@ capture looped ok")
-                            processor, processor_idx = self.next_processor(processor, processor_idx)
-                            if processor is not None:
-                                init_once = True
-                                frame_count = 0
-                                self.paused = False
-                                self.view_org = True
-                        if not ret or processor is None:
-                            print(f"@@ capture loop ended")
-                            break
+                        cap.set(cv2.CAP_PROP_POS_FRAMES, self.start_frame)
+                        end_reached = True
+                        continue
                     if do_crop:
                         frame = frame[crop_y1:crop_y2, crop_x1:crop_x2]
                     frame_count += 1
+                    if self.end_loop_frame > 0 and self.end_loop_frame == frame_count:
+                        end_reached = True
                     last_frame = frame.copy()
                     if self.view_org and frame_count == 50:
                         self.view_org = False
@@ -265,7 +280,6 @@ class Main:
 
                 end_loop_s = time.perf_counter()
                 loop_s = end_loop_s - start_loop_s
-                self.parseKeys()
 
         finally:
             print("@@ Main loop ended.")
