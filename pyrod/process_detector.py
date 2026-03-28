@@ -121,6 +121,9 @@ class Detector(ProcessorBase):
         index255 = np.where(row == 255)[0]  # Find all rod pixels in the row
         # index0 = np.where(row == 0)[0]  # Find all rod pixels in the row
         # print(f"@@ idx0: {index0} // idx255: {index255}")
+        if len(index255) == 0:
+            return 0, 0
+
         left255 = index255[0]
         right255 = index255[-1]
         # print(f"@@ {left255} -> {right255} // idx255: {index255}")
@@ -226,13 +229,13 @@ class Detector(ProcessorBase):
         left0, right0 = self.measure_rod_width(wide_mask_u8,
             rod_x_ctr,
             roi_height - 1)
+        if right0 > left0:
+            # inpainted = cv2.inpaint(roi_rgb, wide_mask_u8, inpaintRadius=5, flags=cv2.INPAINT_TELEA)
+            # inpainted = cv2.inpaint(roi_rgb, wide_mask_u8, inpaintRadius=5, flags=cv2.INPAINT_NS)
+            # inpainted = self.inpaint_rod_biharmonic(roi_rgb, wide_mask_u8)
 
-        # inpainted = cv2.inpaint(roi_rgb, wide_mask_u8, inpaintRadius=5, flags=cv2.INPAINT_TELEA)
-        # inpainted = cv2.inpaint(roi_rgb, wide_mask_u8, inpaintRadius=5, flags=cv2.INPAINT_NS)
-        # inpainted = self.inpaint_rod_biharmonic(roi_rgb, wide_mask_u8)
-
-        inpainted = self.inpaint_dual_mirror(wide_roi_rgb, wide_mask_u8, left0, right0)
-        frame[-roi_height:, :] = inpainted
+            inpainted = self.inpaint_dual_mirror(wide_roi_rgb, wide_mask_u8, left0, right0)
+            frame[-roi_height:, :] = inpainted
 
         if self.view_mask:
             return cv2.cvtColor(lu, cv2.COLOR_GRAY2BGR)
