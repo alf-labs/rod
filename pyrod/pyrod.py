@@ -44,7 +44,6 @@ class Main:
         self.paused = False
         self.single_frame = False
         self.view_org = False
-        self.view_mask = False
         self.allow_export = False
         self.quit_requested = False
         self.start_frame = 0
@@ -71,6 +70,7 @@ class Main:
         parser.add_argument("-n", "--no-video", action="store_true", help="Skip Video Output")
         parser.add_argument("-l", "--locator", default="", help="Locator JSON data to read back")
         parser.add_argument("-0", "--locator-only", action="store_true", help="Only run locator process")
+        parser.add_argument("-1", "--detector-preview", action="store_true", help="Run detector in preview (no inpaint)")
         parser.add_argument("-c", "--crop", action="store_true", help="Center Crop Large Video to 1920x1080")
         parser.add_argument("-s", "--start", default="0", help="Start frame")
         parser.add_argument("-e", "--end", default="0", help="End/loop frame")
@@ -95,7 +95,7 @@ class Main:
             self.end_loop_frame = int(args.end)
         return args
 
-    def parseKeys(self, wait_ms=1):
+    def parseKeys(self, processor, wait_ms=1):
         if self.paused:
             wait_ms = 300
         key = cv2.waitKey(wait_ms) & 0xFF
@@ -110,7 +110,8 @@ class Main:
         elif key == ord('o'):
             self.view_org = not self.view_org
         elif key == ord('m'):
-            self.view_mask = not self.view_mask
+            if processor is not None:
+                processor.view_mask = not processor.view_mask
         elif key == ord('s'):
             self.skip_num = 1 + self.skip_num % 4
         elif key == ord('1'):
@@ -128,6 +129,7 @@ class Main:
 
     def next_processor(self, processor, processor_idx):
         if processor is not None:
+            processor.pre_release()
             if self.allow_export:
                 path = self.export_path.get(processor_idx, None)
                 if path:
@@ -168,20 +170,20 @@ class Main:
             init_once = True
             processor = None
             self.paused = False
-            self.view_org = True
 
             do_crop = False
-            width = vid_width
-            height = vid_height
+            cropped_width = vid_width
+            cropped_height = vid_height
             if args.crop:
                 do_crop = True
-                width = min(1920, vid_width)
-                height = min(1080, vid_height)
-                crop_x1 = (vid_width - width) // 2
-                crop_y1 = (vid_height - height) // 2
-                crop_x2 = crop_x1 + width
-                crop_y2 = crop_y1 + height
-
+                cropped_width = min(1920, vid_width)
+                cropped_height = min(1080, vid_height)
+                crop_x1 = (vid_width - cropped_width) // 2
+                crop_y1 = (vid_height - cropped_height) // 2
+                crop_x2 = crop_x1 + cropped_width
+                crop_y2 = crop_y1 + cropped_height
+            width = cropped_width
+            height = cropped_height
 
             # Processor #0
             processor_idx = 0
@@ -195,7 +197,10 @@ class Main:
             processor = self.processors[0]
             if not args.locator_only:
                 # Processor #1
-                self.processors.append( Detector(processor) )
+                if args.detector_preview:
+                    self.processors.append( Detector(processor, inpainting=False) )
+                else:
+                    self.processors.append( Detector(processor) )
             print(f"@@ Start with processor #{processor_idx}: {processor}")
 
             if args.no_video == False:
@@ -206,14 +211,23 @@ class Main:
             last_frame = None
             end_reached = False
             frame_count = self.start_frame
+            do_downscale = 1  # can be either 1 or 2
             print(f"@@ Reader cap isOpened: {cap.isOpened()}, {width}x{height}@{fps} fps")
             cap.set(cv2.CAP_PROP_POS_FRAMES, self.start_frame)
             while cap.isOpened() and not self.quit_requested:
-                self.parseKeys()
+                self.parseKeys(processor)
                 start_loop_s = time.perf_counter()
                 if self.paused:
                     frame = last_frame.copy()
                 else:
+                    if init_once:
+                        print(f"Init Processor {processor_idx}, Video size: {width}x{height}")
+                        processor.init_size(width, height)
+                        do_downscale = processor.downscale
+                        width = processor.width
+                        height = processor.height
+                        init_once = False
+
                     if end_reached:
                         print(f"@@ capture loop next")
                         end_reached = False
@@ -221,8 +235,10 @@ class Main:
                         if processor is not None:
                             init_once = True
                             frame_count = self.start_frame
+                            width = cropped_width
+                            height = cropped_height
                             self.paused = False
-                            self.view_org = True
+                            continue
                         else:
                             print(f"@@ capture loop ended")
                             break
@@ -235,28 +251,20 @@ class Main:
                         continue
                     if do_crop:
                         frame = frame[crop_y1:crop_y2, crop_x1:crop_x2]
+                    if do_downscale == 2:
+                        frame = cv2.pyrDown(frame) # downscale by a fixed 2x factor
                     frame_count += 1
                     if self.end_loop_frame > 0 and self.end_loop_frame == frame_count:
                         end_reached = True
                     last_frame = frame.copy()
-                    if self.view_org and frame_count == 50:
-                        self.view_org = False
 
                 _skip_num = self.skip_num
                 if _skip_num > 1:
                     if frame_count % _skip_num != 0:
                         continue
 
-                if init_once:
-                    h, w, _ = frame.shape
-                    assert h == height
-                    assert w == width
-                    print(f"Init Processor {processor_idx}, Video size: {width}x{height}")
-                    processor.init_size(width, height)
-                    init_once = False
-
                 if not self.paused:
-                    processor.init_overlay(frame, self.view_mask)
+                    processor.init_overlay(frame)
                     result = processor.filter(frame_count, frame)
 
                     self.print_fps(loop_s, frame_count, processor.overlay)

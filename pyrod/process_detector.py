@@ -14,11 +14,13 @@ SKEW_PCT = 45/180
 
 
 class Detector(ProcessorBase):
-    def __init__(self, locator):
+    def __init__(self, locator, inpainting=True):
         super().__init__()
         self.frame_rods = locator.frame_rods
         self.clahe = cv2.createCLAHE(clipLimit=1.5, tileGridSize=(8, 8))
+        self.do_inpainting = inpainting
         self.history_mask = None
+        self.view_mask = not inpainting
 
     def init_size(self, width, height):
         super().init_size(width, height)
@@ -28,8 +30,8 @@ class Detector(ProcessorBase):
         self.roi_height = int(ROI_HEIGHT * height)
         print(f"ROI Detector: {self.roi_width}x{self.roi_height}")
 
-    def init_overlay(self, frame, view_mask):
-        super().init_overlay(frame, view_mask)
+    def init_overlay(self, frame):
+        super().init_overlay(frame)
 
     def extract_roi(self, lu, rod_x_ctr):
         roi_x_left  = int(rod_x_ctr - self.roi_width / 2)
@@ -262,6 +264,7 @@ class Detector(ProcessorBase):
         if frame_index >= 0 and frame_index < len(self.frame_rods):
             rod = self.frame_rods[frame_index]
         else:
+            print(f"@@ Detector: No rod info at frame {frame_index}")
             return frame
 
         if rod.isTunnel():
@@ -290,7 +293,7 @@ class Detector(ProcessorBase):
             rod_x_ctr - roi_x_left,
             roi_height - 1)
 
-        # TBD we could detect (and skip) spurious invalida masks based
+        # TBD we could detect (and skip) spurious invalid masks based
         # on pixel count jumping too high.
 
         # -- Phase 2
@@ -311,16 +314,17 @@ class Detector(ProcessorBase):
         if self.view_mask:
             self.draw_mask(wide_mask_u8, (0, 0, 255), 0)
 
-        left0, right0 = self.measure_rod_width(blur_mask_u8,
-            rod_x_ctr,
-            roi_height - 1)
-        if right0 > left0:
-            # inpainted = cv2.inpaint(roi_rgb, wide_mask_u8, inpaintRadius=5, flags=cv2.INPAINT_TELEA)
-            # inpainted = cv2.inpaint(roi_rgb, wide_mask_u8, inpaintRadius=5, flags=cv2.INPAINT_NS)
-            # inpainted = self.inpaint_rod_biharmonic(roi_rgb, wide_mask_u8)
+        if self.do_inpainting:
+            left0, right0 = self.measure_rod_width(blur_mask_u8,
+                rod_x_ctr,
+                roi_height - 1)
+            if right0 > left0:
+                # inpainted = cv2.inpaint(roi_rgb, wide_mask_u8, inpaintRadius=5, flags=cv2.INPAINT_TELEA)
+                # inpainted = cv2.inpaint(roi_rgb, wide_mask_u8, inpaintRadius=5, flags=cv2.INPAINT_NS)
+                # inpainted = self.inpaint_rod_biharmonic(roi_rgb, wide_mask_u8)
 
-            inpainted = self.inpaint_dual_mirror(wide_roi_rgb, blur_mask_u8, left0, right0)
-            frame[-roi_height:, :] = inpainted
+                inpainted = self.inpaint_dual_mirror(wide_roi_rgb, blur_mask_u8, left0, right0)
+                frame[-roi_height:, :] = inpainted
 
         if self.view_mask:
             return cv2.cvtColor(lu, cv2.COLOR_GRAY2BGR)

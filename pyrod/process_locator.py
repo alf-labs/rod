@@ -22,12 +22,13 @@ class LocatorBase(ProcessorBase):
         super().__init__()
         self.frame_rods = []
         self.frame_tunnel_metric = {}
+        self.downscale = 1  # can be either 1 or 2
 
     def init_size(self, width, height):
         super().init_size(width, height)
 
-    def init_overlay(self, frame, view_mask):
-        super().init_overlay(frame, view_mask)
+    def init_overlay(self, frame):
+        super().init_overlay(frame)
 
     def append_frame_rod(self, new_rod):
         last_rod = None
@@ -94,6 +95,12 @@ class LocatorGen(LocatorBase):
         self.frame_rods = []
 
     def init_size(self, width, height):
+        if width > 1280 and width % 2 == 0 and height % 2 == 0:
+            self.downscale = 2
+            width = width // 2
+            height = height // 2
+            print(f"Locator downscaling by factor {self.downscale} to {width}x{height}")
+
         super().init_size(width, height)
         print(f"@@ Locator init_size")
 
@@ -372,6 +379,11 @@ class LocatorGen(LocatorBase):
 
         return cv2.cvtColor(lu, cv2.COLOR_GRAY2BGR)
 
+    def pre_release(self):
+        super().pre_release()
+        for rod in self.frame_rods:
+            rod.apply_scale(self.downscale)
+
     def export(self, filename):
         print(f"@@ Locator export")
         content = [ rod.toJson() for rod in self.frame_rods ]
@@ -390,8 +402,8 @@ class LocatorRdr(LocatorBase):
     def init_size(self, width, height):
         super().init_size(width, height)
 
-    def init_overlay(self, frame, view_mask):
-        super().init_overlay(frame, view_mask)
+    def init_overlay(self, frame):
+        super().init_overlay(frame)
 
     def readJson(self, filename):
         print(f"@@ LocatorRdr JSON input read {filename}")

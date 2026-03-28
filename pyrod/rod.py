@@ -16,6 +16,11 @@ class Rod:
         self.frame = other_rod.frame
         self.tunnel_metric = other_rod.tunnel_metric
 
+    def apply_scale(self, scale):
+        if scale != 1:
+            self.left = self.left * scale
+            self.right = self.right * scale
+
     def center(self):
         return (self.left + self.right) / 2
 

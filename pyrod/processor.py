@@ -7,6 +7,7 @@ class ProcessorBase:
         self.overlay = None
         self.view_mask = False
         self.trigger_pause = False
+        self.downscale = 1
         self.next_processor_requested = False
 
     def init_size(self, width, height):
@@ -14,8 +15,7 @@ class ProcessorBase:
         self.width = width
         self.height = height
 
-    def init_overlay(self, frame, view_mask):
-        self.view_mask = view_mask
+    def init_overlay(self, frame):
         if self.overlay is None:
             self.overlay = np.zeros_like(frame)
         else:
@@ -29,6 +29,9 @@ class ProcessorBase:
 
     def filter(self, frame_index, frame):
         return frame
+
+    def pre_release(self):
+        print(f"@@ {self} pre-release no-op")
 
     def export(self, filename):
         print(f"@@ {self} export no-op")
