@@ -134,13 +134,15 @@ class Detector(ProcessorBase):
 
     def inpaint_rod_biharmonic_unused(self, rgb_image, mask_u8):
         # Convert mask to boolean (True where rod is)
-        mask_b = mask_u8.astype(bool)
+        mask_b = mask_u8 > 16
 
         # Convert RGB image to float in [0, 1]
         rgb_f32 = rgb_image.astype(np.float32) / 255.0
 
         # Apply biharmonic inpainting
-        inpainted_f32 = inpaint.inpaint_biharmonic(rgb_f32, mask_b, channel_axis=-1)
+        inpainted_f32 = inpaint.inpaint_biharmonic(rgb_f32, mask_b,
+            split_into_regions=True,
+            channel_axis=-1)
 
         # Convert back to uint8
         inpainted_u8 = (inpainted_f32 * 255).astype(np.uint8)
@@ -288,6 +290,16 @@ class Detector(ProcessorBase):
         # result = right_overlay * 2
         return np.clip(result, 0, 255).astype(np.uint8)
 
+    def apply_masked_blur(self, rgb, mask_u8, ksize=(15, 15), sigma=0):
+        """Applies Gaussian Blur to an image based on a gradient mask."""
+        blurred_rgb = cv2.GaussianBlur(rgb, ksize, sigma)
+        # Expand dims to (H, W, 1) so it broadcasts across R, G, and B
+        alpha = mask_u8.astype(np.float32) / 255.0
+        alpha = np.expand_dims(alpha, axis=-1)
+
+        composite = (blurred_rgb.astype(np.float32) * alpha) + (rgb.astype(np.float32) * (1.0 - alpha))
+        return composite.astype(np.uint8)
+
     def filter(self, frame_index, frame):
         if frame_index >= 0 and frame_index < len(self.frame_rods):
             rod = self.frame_rods[frame_index]
@@ -348,16 +360,21 @@ class Detector(ProcessorBase):
             self.draw_mask(blur_mask_u8, 0)
 
         if self.do_inpainting:
-            left0, right0 = self.measure_rod_width(blur_mask_u8,
-                rod_x_ctr,
-                roi_height - 1)
-            if right0 > left0:
-                # inpainted = cv2.inpaint(roi_rgb, wide_mask_u8, inpaintRadius=5, flags=cv2.INPAINT_TELEA)
-                # inpainted = cv2.inpaint(roi_rgb, wide_mask_u8, inpaintRadius=5, flags=cv2.INPAINT_NS)
-                # inpainted = self.inpaint_rod_biharmonic(roi_rgb, wide_mask_u8)
+            # left0, right0 = self.measure_rod_width(blur_mask_u8,
+            #     rod_x_ctr,
+            #     roi_height - 1)
+            # if right0 > left0:
+            # inpainted = cv2.inpaint(wide_roi_rgb, blur_mask_u8, inpaintRadius=5, flags=cv2.INPAINT_TELEA)
+            inpainted = cv2.inpaint(wide_roi_rgb, blur_mask_u8, inpaintRadius=5, flags=cv2.INPAINT_NS)
+            # inpainted = self.apply_masked_blur(inpainted, blur_mask_u8, (1, 15))
 
-                inpainted = self.inpaint_dual_mirror(wide_roi_rgb, blur_mask_u8, left0, right0)
-                frame[-roi_height:, :] = inpainted
+            # h_blur_width = 15
+            # blur_mask_u8 = cv2.GaussianBlur(wide_mask_u8, (h_blur_width, h_dilate_width), 0)
+
+            #     # inpainted = self.inpaint_rod_biharmonic(roi_rgb, wide_mask_u8)
+
+            #     inpainted = self.inpaint_dual_mirror(wide_roi_rgb, blur_mask_u8, left0, right0)
+            frame[-roi_height:, :] = inpainted
 
         if self.view_mask:
             return cv2.cvtColor(lu, cv2.COLOR_GRAY2BGR)
