@@ -28,12 +28,6 @@ class TemporalRodTracker:
         self.min_hits = min_hits
         self.max_misses = max_misses
 
-    def _compute_iou(self, rod1, rod2):
-        # Compute IoU between two intervals
-        intersection = max(0, min(rod1.right, rod2.right) - max(rod1.left, rod2.left))
-        union = (rod1.right - rod1.left) + (rod2.right - rod2.left) - intersection
-        return intersection / union if union > 0 else 0
-
     def update(self, candidates):
         matched_indices = set()
 
@@ -45,7 +39,7 @@ class TemporalRodTracker:
             for i, rod in enumerate(candidates):
                 if i in matched_indices:
                     continue
-                iou = self._compute_iou(track.rod, rod)
+                iou = track.rod.iou(rod)
                 if iou > best_iou and iou > self.iou_threshold:
                     best_iou = iou
                     best_cand_idx = i

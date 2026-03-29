@@ -27,6 +27,13 @@ class Rod:
     def width(self):
         return self.right - self.left
 
+    def iou(self, rod2):
+        """Computes IoU (Intersection over Union) between this and the other rod"""
+        rod1 = self
+        intersection = max(0, min(rod1.right, rod2.right) - max(rod1.left, rod2.left))
+        union = (rod1.right - rod1.left) + (rod2.right - rod2.left) - intersection
+        return intersection / union if union > 0 else 0
+
     def __repr__(self):
         return f"Rod( {self.left:.3f} -> {self.right:.3f} ; width {self.width():.3f} ; score {self.score:.3f} ; tunnel {self.tunnel_metric:.3f} )"
 

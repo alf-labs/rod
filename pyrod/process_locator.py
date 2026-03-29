@@ -13,7 +13,7 @@ ROD_W_RANGE = (20/1280, 60/1280)
 
 ROI_WIDTH_PCT = 0.3
 
-TRACKER_IOU_PCT=0.4
+TRACKER_IOU_PCT=0.25
 TRACKER_MIN_HITS=7
 TRACKER_MAX_MISS=3
 
@@ -59,14 +59,15 @@ class LocatorBase(ProcessorBase):
             new_rod.tunnel_metric = self.frame_tunnel_metric[new_idx]
         self.frame_rods.append(new_rod)
 
-    def draw_rod(self, rod):
+    def draw_rod(self, rod, new_rod=True):
         if rod is None:
             return
         left_px = int(rod.left)
         right_px = int(rod.right)
         y1 = self.height - GRAPH_Y_OFFSET
         y2 = y1 - 128
-        cv2.rectangle(self.overlay, (left_px, y1), (right_px, y2), (0, 255, 0), 4)
+        color = (0, 255, 0) if new_rod else (0, 0, 255)
+        cv2.rectangle(self.overlay, (left_px, y1), (right_px, y2), color, 4)
 
     def filter(self, frame_index, frame):
         return super().filter(frame_index, frame)
@@ -236,9 +237,14 @@ class LocatorGen(LocatorBase):
         ys = y - 255
         for t in self.temporal_tracker.tracks:
             color = (0, 0, 255) if t.id == best_id else (255, 255, 0)
+
+            iou = 0
+            if self.current_rod is not None:
+                iou = t.rod.iou(self.current_rod)
+
             # ys = y - min(max(int(950 - t.rod.score), 0), 255)
             ys -= 5
-            text1 = f"{t._last_temporal_score:4.2f}"
+            text1 = f"{iou:4.2f}"
             text2 = f"{t.rod.score:4.3f}"
             cv2.line(self.overlay, (int(t.rod.left), ys), (int(t.rod.right), ys), color, 3)
             ys -= 10
@@ -340,6 +346,7 @@ class LocatorGen(LocatorBase):
         # The mean/std plumets in tunnels.
         is_dark, tunnel_metric = self.is_frame_too_dark(bottom_lu[:, roi_q:-roi_q])
         self.frame_tunnel_metric[frame_index] = tunnel_metric
+        new_rod = None
         if not is_dark:
             # Compute and smooth the CV vector
             cv_lu = self.get_cv_vectorized(contrast_lu)
@@ -375,7 +382,7 @@ class LocatorGen(LocatorBase):
             (255, 255, 0),              # color
             1 )                         # line thickness
 
-        self.draw_rod(self.current_rod)
+        self.draw_rod(self.current_rod, new_rod is not None)
 
         return cv2.cvtColor(lu, cv2.COLOR_GRAY2BGR)
 
