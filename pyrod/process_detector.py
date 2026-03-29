@@ -69,17 +69,19 @@ class Detector(ProcessorBase):
         # Try a basic binary mask
         median_luminance = np.median(roi_lu)
         trigger_luminance = (median_luminance + roi_lu[tracked_y, tracked_x]) // 2
-        mask = roi_lu > trigger_luminance
-        mask_f32 = mask.astype(np.float32)
+        mask_b = roi_lu > trigger_luminance
+        # mask_f32 = mask_u8.astype(np.float32)
+        mask_u8 = mask_b.astype(np.uint8) * 255
 
         # Erode and dilate
         # Kernel choices: 3x3 typical, or 5x1 (vertical band) to favor vertical features.
         kernel = np.ones((5, 3), np.uint8)
-        mask_f32 = cv2.morphologyEx(mask_f32, cv2.MORPH_OPEN, kernel, iterations=1)
+        # mask_f32 = cv2.morphologyEx(mask_f32, cv2.MORPH_OPEN, kernel, iterations=1)
+        # return mask_f32
+        mask_u8 = cv2.morphologyEx(mask_u8, cv2.MORPH_OPEN, kernel, iterations=1)
+        return mask_u8
 
-        return mask_f32
-
-    def temporal_smooth_mask(self, mask_f32, history_mask, weight_new):
+    def temporal_smooth_mask_f32(self, mask_f32, history_mask, weight_new):
         if history_mask is None:
             new_history = mask_f32
         else:
@@ -92,10 +94,34 @@ class Detector(ProcessorBase):
 
         return new_history, mask_u8
 
+    def temporal_smooth_mask_u8(self, mask_u8, history_u8, weight_u8):
+        if history_u8 is None:
+            return mask_u8, mask_u8
+        inv_weight_u8 = 256 - weight_u8
+
+        # Formula: (History * (256 - alpha) + New * alpha) / 256
+        acc = (history_u8.astype(np.uint16) * inv_weight_u8) + (mask_u8.astype(np.uint16) * weight_u8)
+        # Bit-shift to divide by 256
+        new_history = (acc >> 8).astype(np.uint8)
+
+        # Original 0.75 threshold becomes 191 (0.75 * 255)
+        # cv2.threshold is much faster than numpy boolean comparisons
+        _, mask_u8 = cv2.threshold(new_history, 191, 255, cv2.THRESH_BINARY)
+
+        return new_history, mask_u8
+
     def keep_contiguous_rod(self, mask_u8, seed_x, seed_y):
         h, w = mask_u8.shape
         flood_mask = np.zeros((h + 2, w + 2), np.uint8) # floodFill needs +2 size
-        cv2.floodFill(mask_u8, flood_mask, (seed_x, seed_y), 255)
+
+         # Note: use FLOODFILL_MASK_ONLY to avoid modifying mask_f32 (we don't nede it)
+        # thus this ignores newVal. Just kept it for the sake of example.
+        cv2.floodFill(
+            mask_u8,
+            flood_mask,
+            (seed_x, seed_y),
+            newVal=255,
+            flags=cv2.FLOODFILL_MASK_ONLY)
 
         return flood_mask[1:-1, 1:-1] * 255
 
@@ -284,11 +310,18 @@ class Detector(ProcessorBase):
             self.draw_roi_bounds(roi_x_left, rod_x_ctr)
 
         roi_height = self.roi_height
-        mask_f32 = self.find_rod_by_threshold(roi_lu,
+
+        # mask_f32 = self.find_rod_by_threshold(roi_lu,
+        #     rod_x_ctr - roi_x_left,
+        #     roi_height - 1)
+        # self.history_mask, mask_u8 = self.temporal_smooth_mask_f32(
+        #     mask_f32, self.history_mask, weight_new=0.25)
+        mask_u8 = self.find_rod_by_threshold(roi_lu,
             rod_x_ctr - roi_x_left,
             roi_height - 1)
-        self.history_mask, mask_u8 = self.temporal_smooth_mask(
-            mask_f32, self.history_mask, weight_new=0.25)
+        self.history_mask, mask_u8 = self.temporal_smooth_mask_u8(
+            mask_u8, self.history_mask, weight_u8=256//4)
+
         mask_u8 = self.keep_contiguous_rod(mask_u8,
             rod_x_ctr - roi_x_left,
             roi_height - 1)
