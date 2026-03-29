@@ -79,6 +79,12 @@ class Detector(ProcessorBase):
         # mask_f32 = cv2.morphologyEx(mask_f32, cv2.MORPH_OPEN, kernel, iterations=1)
         # return mask_f32
         mask_u8 = cv2.morphologyEx(mask_u8, cv2.MORPH_OPEN, kernel, iterations=1)
+
+        # Erode the mask horizontally a bit more
+        h_dilate_width = 15
+        kernel_h = np.ones((1, h_dilate_width), np.uint8)
+        mask_u8 = cv2.dilate(mask_u8, kernel_h, iterations=1)
+
         return mask_u8
 
     def temporal_smooth_mask_f32(self, mask_f32, history_mask, weight_new):
@@ -290,6 +296,54 @@ class Detector(ProcessorBase):
         # result = right_overlay * 2
         return np.clip(result, 0, 255).astype(np.uint8)
 
+    def inpaint_manual(self, wide_roi_rgb, blur_mask_u8):
+        h, w, _ = wide_roi_rgb.shape
+
+        for y in range(h-1, 0, -1):
+            blur_row = blur_mask_u8[y, :]
+            rgb_row = wide_roi_rgb[y, :]
+
+            index255 = np.where(blur_row == 255)[0]
+            if len(index255) == 0:
+                break  # no more rod
+            left255 = index255[0]
+            right255 = index255[-1]
+            rw = right255 - left255
+
+            threshold = 1
+            left0 = np.argmax(blur_row[:left255] > threshold)
+            right0 = right255 + np.argmax(blur_row[right255:] <= threshold)
+            w0 = right0 - left0
+
+            # # Version A: copy L2-R2 mirrored as-is, no blur.
+            # src_row = rgb_row[left255 - 1 : left255 - rw - 1 : -1, :]
+            # rgb_row[left255:right255] = src_row[:]
+
+            # Version B: copy L2-Ro mirrored on L2, as-is, no blur.
+            # Note that we do NOT mirror the L0-L2 part as it _must_ contain the rod.
+            src_row = rgb_row[left255 : 2*left255 - right0 : -1, :]
+            rgb_row[left255 : right0] = src_row[:]
+
+            # # Version C: same as B but apply blur mask in uint16 space
+            mask_u8 = blur_row[left255 : right0, None].astype(np.uint16)
+            src_row_u16 = src_row.astype(np.uint16)
+            dst_row_u16 = rgb_row[left255 : right0].astype(np.uint16)
+            # print(f"@@ mask_u8.shape={mask_u8.shape}, src_row_u16.shape={src_row_u16.shape}, dst_row_u16.shape={dst_row_u16.shape}")
+            blended = (
+                    dst_row_u16 * (255 - mask_u8)
+                    + src_row_u16 * mask_u8
+                ) // 255
+            rgb_row[left255 : right0] = blended.astype(np.uint8)
+
+            # # DEBUG
+            # rgb_row[left0] = (255, 0, 0)
+            # rgb_row[right0] = (255, 0, 0)
+            # rgb_row[left255] = (0, 255, 0)
+            # rgb_row[right255] = (0, 255, 0)
+
+        return wide_roi_rgb
+
+
     def apply_masked_blur(self, rgb, mask_u8, ksize=(15, 15), sigma=0):
         """Applies Gaussian Blur to an image based on a gradient mask."""
         blurred_rgb = cv2.GaussianBlur(rgb, ksize, sigma)
@@ -350,11 +404,13 @@ class Detector(ProcessorBase):
 
         wide_roi_rgb = frame[-roi_height:, :]
 
+        # Original: Dilate by (1, h_dilate_width), blur by (h_dilate_width, 1)
+        # Experiment: Dilate by (1, h_dilate_width), blur by (h_dilate_width, 1)
         h_dilate_width = 15
-        kernel_h = np.ones((h_dilate_width, h_dilate_width), np.uint8)
+        kernel_h = np.ones((3, h_dilate_width), np.uint8)
         wide_mask_u8 = cv2.dilate(wide_mask_u8, kernel_h, iterations=1)
         h_blur_width = 15
-        blur_mask_u8 = cv2.GaussianBlur(wide_mask_u8, (h_blur_width, h_dilate_width), 0)
+        blur_mask_u8 = cv2.GaussianBlur(wide_mask_u8, (h_blur_width, 3), 0)
 
         if self.view_mask:
             self.draw_mask(blur_mask_u8, 0)
@@ -365,15 +421,15 @@ class Detector(ProcessorBase):
             #     roi_height - 1)
             # if right0 > left0:
             # inpainted = cv2.inpaint(wide_roi_rgb, blur_mask_u8, inpaintRadius=5, flags=cv2.INPAINT_TELEA)
-            inpainted = cv2.inpaint(wide_roi_rgb, blur_mask_u8, inpaintRadius=5, flags=cv2.INPAINT_NS)
+            # inpainted = cv2.inpaint(wide_roi_rgb, blur_mask_u8, inpaintRadius=5, flags=cv2.INPAINT_NS)
             # inpainted = self.apply_masked_blur(inpainted, blur_mask_u8, (1, 15))
-
             # h_blur_width = 15
             # blur_mask_u8 = cv2.GaussianBlur(wide_mask_u8, (h_blur_width, h_dilate_width), 0)
 
             #     # inpainted = self.inpaint_rod_biharmonic(roi_rgb, wide_mask_u8)
 
             #     inpainted = self.inpaint_dual_mirror(wide_roi_rgb, blur_mask_u8, left0, right0)
+            inpainted = self.inpaint_manual(wide_roi_rgb, blur_mask_u8)
             frame[-roi_height:, :] = inpainted
 
         if self.view_mask:
