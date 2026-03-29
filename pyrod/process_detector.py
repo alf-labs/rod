@@ -125,10 +125,12 @@ class Detector(ProcessorBase):
 
         return flood_mask[1:-1, 1:-1] * 255
 
-    def draw_mask(self, mask, color, roi_x_left):
+    def draw_mask(self, mask, roi_x_left):
         height, width = mask.shape
         overlay_view = self.overlay[-height:, roi_x_left:roi_x_left + width]
-        overlay_view[mask != 0] = color
+        overlay_view[mask >    1] = (0, 255, 255)
+        overlay_view[mask >  128] = (0, 128, 255)
+        overlay_view[mask == 255] = (0,   0, 255)
 
     def inpaint_rod_biharmonic_unused(self, rgb_image, mask_u8):
         # Convert mask to boolean (True where rod is)
@@ -311,17 +313,15 @@ class Detector(ProcessorBase):
 
         roi_height = self.roi_height
 
-        # mask_f32 = self.find_rod_by_threshold(roi_lu,
-        #     rod_x_ctr - roi_x_left,
-        #     roi_height - 1)
-        # self.history_mask, mask_u8 = self.temporal_smooth_mask_f32(
-        #     mask_f32, self.history_mask, weight_new=0.25)
         mask_u8 = self.find_rod_by_threshold(roi_lu,
             rod_x_ctr - roi_x_left,
             roi_height - 1)
+        mask_u8 = self.keep_contiguous_rod(mask_u8,
+            rod_x_ctr - roi_x_left,
+            roi_height - 1)
+
         self.history_mask, mask_u8 = self.temporal_smooth_mask_u8(
             mask_u8, self.history_mask, weight_u8=256//4)
-
         mask_u8 = self.keep_contiguous_rod(mask_u8,
             rod_x_ctr - roi_x_left,
             roi_height - 1)
@@ -338,14 +338,14 @@ class Detector(ProcessorBase):
 
         wide_roi_rgb = frame[-roi_height:, :]
 
-        # h_dilate_width = 9
-        # kernel_h = np.ones((1, h_dilate_width), np.uint8)
-        # wide_mask_u8 = cv2.dilate(wide_mask_u8, kernel_h, iterations=1)
-        # h_blur_width = 15
-        # blur_mask_u8 = cv2.GaussianBlur(wide_mask_u8, (h_blur_width, 1), 0)
+        h_dilate_width = 15
+        kernel_h = np.ones((h_dilate_width, h_dilate_width), np.uint8)
+        wide_mask_u8 = cv2.dilate(wide_mask_u8, kernel_h, iterations=1)
+        h_blur_width = 15
+        blur_mask_u8 = cv2.GaussianBlur(wide_mask_u8, (h_blur_width, h_dilate_width), 0)
 
         if self.view_mask:
-            self.draw_mask(wide_mask_u8, (0, 0, 255), 0)
+            self.draw_mask(blur_mask_u8, 0)
 
         if self.do_inpainting:
             left0, right0 = self.measure_rod_width(blur_mask_u8,
