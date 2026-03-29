@@ -33,8 +33,9 @@ class ProcessorBase:
     def pre_release(self):
         print(f"@@ {self} pre-release no-op")
 
-    def export(self, filename):
+    def export(self):
         print(f"@@ {self} export no-op")
+        return {}
 
     def release(self):
         print(f"@@ {self} release no-op")

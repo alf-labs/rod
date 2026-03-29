@@ -8,6 +8,7 @@ IS_RPI = os.path.isfile("/etc/rpi-issue")
 
 import argparse
 import base64
+import json
 import sys
 import time
 
@@ -49,7 +50,10 @@ class Main:
         self.start_frame = 0
         self.end_loop_frame = 0
         self.processors = []
-        self.export_path = {}
+        self.export_content = {}
+        self.locator_path = ""
+        self.export_path = ""
+        self.do_crop = False
 
     def print_fps(self, loop_s, frame_count, dest):
         fps = 1/loop_s if loop_s > 0 else 0
@@ -85,14 +89,14 @@ class Main:
         self.output_path = f"{args.output}".replace("IDX", str(input_idx))
         if args.locator:
             self.locator_path = args.locator
-        else:
-            self.locator_path = self.output_path.replace(".mp4", "") + ".0.json"
+        self.export_path = self.output_path.replace(".mp4", "") + ".json"
         print("Input:", self.input_path)
         print("Output:", self.output_path, "(disabled by -n)" if args.no_video else "")
         if args.start.isdigit():
             self.start_frame = int(args.start)
         if args.end.isdigit():
             self.end_loop_frame = int(args.end)
+        self.do_crop = args.crop
         return args
 
     def parseKeys(self, processor, wait_ms=1):
@@ -131,9 +135,7 @@ class Main:
         if processor is not None:
             processor.pre_release()
             if self.allow_export:
-                path = self.export_path.get(processor_idx, None)
-                if path:
-                    processor.export(path)
+                self.export_content.update( processor.export() )
             processor.release()
         processor = None
         processor_idx += 1
@@ -144,9 +146,29 @@ class Main:
             print(f"@@ No next processor #{processor_idx}")
         return processor, processor_idx
 
+    def read_json(self, filename):
+        print(f"@@ Load JSON from {filename}")
+        with open(filename, "r") as f:
+            self.export_content = json.load(f)
+
+    def export_json(self, filename, content):
+        with open(filename, "w") as f:
+            json.dump(content, f, indent=2)
+        print(f"@@ Export JSON output to {filename}")
+
     def run(self):
         print("@@ Run")
         args = self.parseArgs()
+
+        if args.locator:
+            self.read_json(self.locator_path)
+            if "pyrod" in self.export_content:
+                pyrod_data = self.export_content["pyrod"]
+                self.input_path = pyrod_data["input_path"]
+                self.start_frame = pyrod_data["start_frame"]
+                self.end_loop_frame = pyrod_data["end_frame"]
+                self.do_crop = not not pyrod_data["crop"]
+                print(f"Overriding input to file '{self.input_path}', frames {self.start_frame} to {self.end_loop_frame}, {'cropped' if self.do_crop else 'uncropped'}")
 
         cv2.namedWindow(WINDOW_TITLE, cv2.WINDOW_NORMAL)
         cv2.resizeWindow(WINDOW_TITLE, 1920//2, 1080//2)
@@ -171,11 +193,10 @@ class Main:
             processor = None
             self.paused = False
 
-            do_crop = False
+            do_crop = self.do_crop
             cropped_width = vid_width
             cropped_height = vid_height
-            if args.crop:
-                do_crop = True
+            if do_crop:
                 cropped_width = min(1920, vid_width)
                 cropped_height = min(1080, vid_height)
                 crop_x1 = (vid_width - cropped_width) // 2
@@ -190,10 +211,9 @@ class Main:
             if args.locator:
                 loc_reader = LocatorRdr()
                 self.processors.append( loc_reader )
-                loc_reader.readJson(self.locator_path)
+                loc_reader.read_json(self.export_content["locator"])
             else:
                 self.processors.append( LocatorGen() )
-                self.export_path[0] = self.locator_path
             processor = self.processors[0]
             if not args.locator_only:
                 # Processor #1
@@ -206,6 +226,12 @@ class Main:
             if args.no_video == False:
                 self.allow_export = True
                 writer = cv2.VideoWriter(self.output_path, fourcc, fps, (width, height), isColor=True)
+                self.export_content["pyrod"] = {
+                    "input_path":   self.input_path,
+                    "start_frame":  self.start_frame,
+                    "end_frame":    self.end_loop_frame,
+                    "crop":         self.do_crop
+                }
                 print(f"@@ Writing {width}x{height}@{fps} fps to", self.output_path)
 
             last_frame = None
@@ -295,6 +321,8 @@ class Main:
             print("@@ Main loop ended.")
             if writer is not None:
                 writer.release()
+            if self.allow_export:
+                self.export_json(self.export_path, self.export_content)
             self.next_processor(processor, processor_idx)
             cap.release()
             cv2.destroyAllWindows()

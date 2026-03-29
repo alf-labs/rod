@@ -331,8 +331,8 @@ class Detector(ProcessorBase):
         else:
             return frame
 
-    def export(self, filename):
-        super().export(filename)
+    def export(self):
+        return super().export()
 
     def release(self):
         super().release()

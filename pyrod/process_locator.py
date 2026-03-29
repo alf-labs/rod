@@ -1,5 +1,4 @@
 import cv2
-import json
 import numpy as np
 import scipy
 from processor import ProcessorBase
@@ -72,8 +71,8 @@ class LocatorBase(ProcessorBase):
     def filter(self, frame_index, frame):
         return super().filter(frame_index, frame)
 
-    def export(self, filename):
-        super().export(filename)
+    def export(self):
+        return super().export()
 
     def release(self):
         super().release()
@@ -391,12 +390,10 @@ class LocatorGen(LocatorBase):
         for rod in self.frame_rods:
             rod.apply_scale(self.downscale)
 
-    def export(self, filename):
+    def export(self):
         print(f"@@ Locator export")
         content = [ rod.toJson() for rod in self.frame_rods ]
-        with open(filename, "w") as f:
-            json.dump(content, f, indent=2)
-        print(f"@@ Locator JSON output to {filename}")
+        return { "locator": content }
 
     def release(self):
         super().release()
@@ -405,6 +402,7 @@ class LocatorGen(LocatorBase):
 class LocatorRdr(LocatorBase):
     def __init__(self):
         super().__init__()
+        self.exported_content = {}
 
     def init_size(self, width, height):
         super().init_size(width, height)
@@ -412,13 +410,12 @@ class LocatorRdr(LocatorBase):
     def init_overlay(self, frame):
         super().init_overlay(frame)
 
-    def readJson(self, filename):
-        print(f"@@ LocatorRdr JSON input read {filename}")
-        with open(filename, "r") as f:
-            loaded = json.load(f)
-            # JSON should contain one array of Rod.toJson().
-            for entry in loaded:
-                self.append_frame_rod(Rod.fromJson(entry))
+    def read_json(self, exported_content):
+        print(f"@@ LocatorRdr JSON load")
+        # exported_content should contain one array of Rod.toJson().
+        self.exported_content = exported_content
+        for entry in exported_content:
+            self.append_frame_rod(Rod.fromJson(entry))
         print(f"@@ LocatorRdr loaded {len(self.frame_rods)} entries from JSON")
         self.next_processor_requested = True
 
@@ -428,8 +425,8 @@ class LocatorRdr(LocatorBase):
             self.draw_rod(rod)
         return frame
 
-    def export(self, filename):
-        super().export(filename)
+    def export(self):
+        return { "locator": self.exported_content }
 
     def release(self):
         super().release()
