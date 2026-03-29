@@ -74,7 +74,7 @@ class Detector(ProcessorBase):
 
         # Erode and dilate
         # Kernel choices: 3x3 typical, or 5x1 (vertical band) to favor vertical features.
-        kernel = np.ones((5, 1), np.uint8)
+        kernel = np.ones((5, 3), np.uint8)
         mask_f32 = cv2.morphologyEx(mask_f32, cv2.MORPH_OPEN, kernel, iterations=1)
 
         return mask_f32
@@ -305,11 +305,11 @@ class Detector(ProcessorBase):
 
         wide_roi_rgb = frame[-roi_height:, :]
 
-        h_dilate_width = 9
-        kernel_h = np.ones((1, h_dilate_width), np.uint8)
-        wide_mask_u8 = cv2.dilate(wide_mask_u8, kernel_h, iterations=1)
-        h_blur_width = 15
-        blur_mask_u8 = cv2.GaussianBlur(wide_mask_u8, (h_blur_width, 1), 0)
+        # h_dilate_width = 9
+        # kernel_h = np.ones((1, h_dilate_width), np.uint8)
+        # wide_mask_u8 = cv2.dilate(wide_mask_u8, kernel_h, iterations=1)
+        # h_blur_width = 15
+        # blur_mask_u8 = cv2.GaussianBlur(wide_mask_u8, (h_blur_width, 1), 0)
 
         if self.view_mask:
             self.draw_mask(wide_mask_u8, (0, 0, 255), 0)
