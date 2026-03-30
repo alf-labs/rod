@@ -1,8 +1,6 @@
 import cv2
 import numpy as np
 import scipy
-import skimage
-from skimage.restoration import inpaint
 from processor import ProcessorBase
 from rod import Rod
 
@@ -14,13 +12,20 @@ SKEW_PCT = 45/180
 
 
 class Detector(ProcessorBase):
-    def __init__(self, locator, inpainting=True):
+    def __init__(self, locator, inpainting="left"):
         super().__init__()
         self.frame_rods = locator.frame_rods
         self.clahe = cv2.createCLAHE(clipLimit=1.5, tileGridSize=(8, 8))
-        self.do_inpainting = inpainting
         self.history_mask = None
-        self.view_mask = not inpainting
+        self.view_mask = inpainting is None
+        self.inpaint_method = {
+            "left": self.inpaint_manual_left,
+            "right": self.inpaint_manual_right,
+            "mix": self.inpaint_manual_mix,
+            "telea": self.inpaint_telea,
+            "navier": self.inpaint_navier,
+        }.get(inpainting, None)
+
 
     def init_size(self, width, height):
         super().init_size(width, height)
@@ -157,165 +162,13 @@ class Detector(ProcessorBase):
         overlay_view[rows, end2  ] = (0,   0, 255)
         overlay_view[rows, end0  ] = (0, 255, 255)
 
-    def inpaint_rod_biharmonic_unused(self, rgb_image, mask_u8):
-        # Convert mask to boolean (True where rod is)
-        mask_b = mask_u8 > 16
+    def inpaint_telea(self, wide_roi_rgb, blur_mask_u8):
+        return cv2.inpaint(wide_roi_rgb, blur_mask_u8, inpaintRadius=5, flags=cv2.INPAINT_TELEA)
 
-        # Convert RGB image to float in [0, 1]
-        rgb_f32 = rgb_image.astype(np.float32) / 255.0
+    def inpaint_navier(self, wide_roi_rgb, blur_mask_u8):
+        return cv2.inpaint(wide_roi_rgb, blur_mask_u8, inpaintRadius=5, flags=cv2.INPAINT_NS)
 
-        # Apply biharmonic inpainting
-        inpainted_f32 = inpaint.inpaint_biharmonic(rgb_f32, mask_b,
-            split_into_regions=True,
-            channel_axis=-1)
-
-        # Convert back to uint8
-        inpainted_u8 = (inpainted_f32 * 255).astype(np.uint8)
-        return inpainted_u8
-
-    def measure_rod_width(self, mask_u8, tracked_x, tracked_y):
-        row = mask_u8[tracked_y, :]  # Extract the row
-        index255 = np.where(row == 255)[0]  # Find all rod pixels in the row
-        if len(index255) == 0:
-            return 0, 0
-
-        left255 = index255[0]
-        right255 = index255[-1]
-        # print(f"@@ {left255} -> {right255} // idx255: {index255}")
-        # return left255, right255
-
-        threshold = 1
-        left0 = np.argmax(row[:tracked_x] > threshold)
-        left0 = min(left0, left255 - self.rod_width_px)
-        right0 = tracked_x + np.argmax(row[tracked_x:] <= threshold)
-        right0 = max(right255 + self.rod_width_px, right0)
-
-        # print(f"@@ {left0} >> {left255} == {right255} [{right255 - left255}] >> {right0} [{right0 - left0}]")
-        # TBD we could detect when the width becomes suddenly much larger and contain it
-        # using an historical center tracker?
-
-        return left0, right0
-
-    def extract_deskewed_left(self, wide_roi_rgb, skew_px):
-        """
-        Extracts a skewed parallelogram and straightens it.
-        skew_px: how many pixels the bottom moves relative to the top
-                (must be positive = bottom is further right).
-        """
-        h, w, _ = wide_roi_rgb.shape
-        dest_w = w - skew_px
-
-        # 1. Define the 3 source points (The Parallelogram)
-        # [Top-Left, Top-Right, Bottom-Left]
-        src_pts = np.array([
-            [0, 0],
-            [dest_w, 0],
-            [skew_px, h]
-        ], dtype=np.float32)
-
-        # 2. Define the 3 destination points (The Straight Rectangle)
-        dst_pts = np.array([
-            [0, 0],
-            [dest_w, 0],
-            [0, h]
-        ], dtype=np.float32)
-
-        # 3. Calculate the Transformation Matrix
-        mat = cv2.getAffineTransform(src_pts, dst_pts)
-
-        # 4. Warp the image to a new buffer
-        straight_strip = cv2.warpAffine(
-            src=wide_roi_rgb,
-            M=mat,
-            dsize=(dest_w, h),
-            flags=cv2.INTER_CUBIC)
-
-        # 5. Pad on the left to retain the original size.
-        # pad constant mode = can add zeroes
-        # pad edge mode = dup 1st column
-        pad_width = ((0, 0), (skew_px, 0), (0, 0))
-        return np.pad(straight_strip, pad_width, mode='edge')
-
-    def extract_deskewed_right(self, wide_roi_rgb, skew_px):
-        """
-        Extracts a skewed parallelogram and straightens it.
-        skew_px: how many pixels the bottom moves relative to the top
-                (must be positive = bottom is further left).
-        """
-        h, w, _ = wide_roi_rgb.shape
-        dest_w = w - skew_px
-
-        # 1. Define the 3 source points (The Parallelogram)
-        # [Top-Left, Top-Right, Bottom-Left]
-        src_pts = np.array([
-            [skew_px, 0],
-            [w, 0],
-            [0, h]
-        ], dtype=np.float32)
-
-        # 2. Define the 3 destination points (The Straight Rectangle)
-        dst_pts = np.array([
-            [0, 0],
-            [dest_w, 0],
-            [0, h]
-        ], dtype=np.float32)
-
-        # 3. Calculate the Transformation Matrix
-        mat = cv2.getAffineTransform(src_pts, dst_pts)
-
-        # 4. Warp the image to a new buffer
-        straight_strip = cv2.warpAffine(
-            src=wide_roi_rgb,
-            M=mat,
-            dsize=(dest_w, h),
-            flags=cv2.INTER_CUBIC)
-
-        # 5. Pad on the right to retain the original size.
-        # pad constant mode = can add zeroes
-        # pad edge mode = dup 1st column
-        pad_width = ((0, 0), (0, skew_px), (0, 0))
-        return np.pad(straight_strip, pad_width, mode='edge')
-
-    def inpaint_dual_mirror(self, wide_roi_rgb, wide_mask_u8, left0, right0):
-        h, w, _ = wide_roi_rgb.shape
-
-        # 1. Normalize Mask to a 0.0-1.0 float factor
-        # Expand dims to (H, W, 1) so it multiplies across R, G, and B channels
-        alpha = wide_mask_u8.astype(np.float32) / 255.0
-        alpha = np.expand_dims(alpha, axis=-1)
-
-        # 2. Create the Mirrored X-Coordinate Maps
-        # x is [0, 1, 2, ..., W-1]
-        x = np.arange(w)
-
-        # Scalar version (Rod is perfectly vertical)
-        idx_l = np.clip(2 * left0 - x, 0, w - 1).astype(np.int32)
-        idx_r = np.clip(2 * right0 - x, 0, w - 1).astype(np.int32)
-
-        # Sample mirrored images
-        img_l = wide_roi_rgb[:, idx_l, :]
-        img_r = wide_roi_rgb[:, idx_r, :]
-
-        skew_px = int(SKEW_PCT * h)
-        img_l = self.extract_deskewed_left(img_l, skew_px)
-        img_r = self.extract_deskewed_right(img_r, skew_px)
-
-        # 3. Create the Premultiplied Overlays
-        # We use 0.5 * alpha to ensure the mix totals 1.0 within the rod area
-        left_overlay = img_l.astype(np.float32) * (alpha * 0.5)
-        right_overlay = img_r.astype(np.float32) * (alpha * 0.5)
-
-        # 4. Extract the Background (Original frame minus the rod)
-        background = wide_roi_rgb.astype(np.float32) * (1.0 - alpha)
-
-        # 5. Final Assembly: Background + Mixed Mirrored Content
-        # Using np.clip to ensure no rounding errors push us past 255
-        result = background + left_overlay + right_overlay
-        # result = left_overlay * 2
-        # result = right_overlay * 2
-        return np.clip(result, 0, 255).astype(np.uint8)
-
-    def inpaint_manual(self, wide_roi_rgb, blur_mask_u8):
+    def inpaint_manual_left(self, wide_roi_rgb, blur_mask_u8):
         h, w, _ = wide_roi_rgb.shape
 
         for y in range(h-1, 0, -1):
@@ -361,6 +214,14 @@ class Detector(ProcessorBase):
             # rgb_row[right255] = (0, 255, 0)
 
         return wide_roi_rgb
+
+    def inpaint_manual_right(self, wide_roi_rgb, blur_mask_u8):
+        # TBD
+        return self.inpaint_manual_left(wide_roi_rgb, blur_mask_u8)
+
+    def inpaint_manual_mix(self, wide_roi_rgb, blur_mask_u8):
+        # TBD
+        return self.inpaint_manual_left(wide_roi_rgb, blur_mask_u8)
 
 
     def apply_masked_blur(self, rgb, mask_u8, ksize=(15, 15), sigma=0):
@@ -434,21 +295,8 @@ class Detector(ProcessorBase):
         if self.view_mask and self.debug:
             self.draw_mask_outline(blur_mask_u8, 0)
 
-        if self.do_inpainting:
-            # left0, right0 = self.measure_rod_width(blur_mask_u8,
-            #     rod_x_ctr,
-            #     roi_height - 1)
-            # if right0 > left0:
-            # inpainted = cv2.inpaint(wide_roi_rgb, blur_mask_u8, inpaintRadius=5, flags=cv2.INPAINT_TELEA)
-            # inpainted = cv2.inpaint(wide_roi_rgb, blur_mask_u8, inpaintRadius=5, flags=cv2.INPAINT_NS)
-            # inpainted = self.apply_masked_blur(inpainted, blur_mask_u8, (1, 15))
-            # h_blur_width = 15
-            # blur_mask_u8 = cv2.GaussianBlur(wide_mask_u8, (h_blur_width, h_dilate_width), 0)
-
-            #     # inpainted = self.inpaint_rod_biharmonic(roi_rgb, wide_mask_u8)
-
-            #     inpainted = self.inpaint_dual_mirror(wide_roi_rgb, blur_mask_u8, left0, right0)
-            inpainted = self.inpaint_manual(wide_roi_rgb, blur_mask_u8)
+        if self.inpaint_method:
+            inpainted = self.inpaint_method(wide_roi_rgb, blur_mask_u8)
             frame[-roi_height:, :] = inpainted
 
         if self.view_mask:

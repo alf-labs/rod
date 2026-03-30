@@ -17,13 +17,12 @@ try:
     import numpy as np
     import imutils
     import scipy
-    import skimage
     from flask import Flask, render_template, Response, request, jsonify
     from process_locator import LocatorGen, LocatorRdr
     from process_detector import Detector
 except ModuleNotFoundError as e:
     print(f"ERROR: Missing library. {e}")
-    print( "To fix: $ pip install opencv-python numpy scipy scikit-image imutils flask")
+    print( "To fix: $ pip install opencv-python numpy scipy imutils flask")
     print(f"or    : $ python {sys.argv[0]}")
     exit(1)
 
@@ -83,6 +82,7 @@ class Main:
         parser.add_argument("-c", "--crop", action="store_true", help="Center Crop Large Video to 1920x1080")
         parser.add_argument("-s", "--start", default="0", help="Start frame")
         parser.add_argument("-e", "--end", default="0", help="End/loop frame")
+        parser.add_argument("-p", "--inpaint", default="left", choices=["left", "right", "mix", "telea", "navier"], help="Inpaint algorithm")
         args = parser.parse_args()
         self.args = args
 
@@ -224,9 +224,9 @@ class Main:
             if not args.locator_only:
                 # Processor #1
                 if args.detector_preview:
-                    self.processors.append( Detector(processor, inpainting=False) )
+                    self.processors.append( Detector(processor, inpainting=None) )
                 else:
-                    self.processors.append( Detector(processor) )
+                    self.processors.append( Detector(processor, inpainting=args.inpaint) )
             for p in self.processors:
                 p.debug = self.debug
             print(f"@@ Start with processor #{processor_idx}: {processor}")

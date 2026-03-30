@@ -39,9 +39,9 @@ if [[ ! -d $DIR ]]; then
     $BIN/python -m pip install --upgrade pip
     if [[ $(uname -s) =~ _NT ]]; then
         echo "WARNING: Building opencv-python under Cygwin takes forever."
-        $BIN/pip install nnumpy scipy scikit-imagey imutils flask
+        $BIN/pip install nnumpy scipy imutils flask
         nice $BIN/pip install --verbose opencv-python
     else
-        $BIN/pip install opencv-python numpy scipy scikit-image imutils flask
+        $BIN/pip install opencv-python numpy scipy imutils flask
     fi
 fi
