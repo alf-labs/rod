@@ -138,6 +138,25 @@ class Detector(ProcessorBase):
         overlay_view[mask >  128] = (0, 128, 255)
         overlay_view[mask == 255] = (0,   0, 255)
 
+    def draw_mask_outline(self, mask_u8, roi_x_left):
+        h, w = mask_u8.shape
+        overlay_view = self.overlay[-h:, roi_x_left:roi_x_left + w]
+
+        rows = np.arange(h)     # all rows as indices [0...h-1]
+
+        # argmax returns the index of the FIRST True value it encounters
+        # axis=1 means to accross axis 1 (which is W in the H,W order)
+        start0 = np.argmax(mask_u8 > 0, axis=1)
+        start2 = np.argmax(mask_u8 == 255, axis=1)
+        flip_u8 = mask_u8[:, ::-1]  # step -1 mirrors on W axis
+        end0 = (w - 1) - np.argmax(flip_u8 > 0, axis=1)
+        end2 = (w - 1) - np.argmax(flip_u8 == 255, axis=1)
+
+        overlay_view[rows, start0] = (0, 255, 255)
+        overlay_view[rows, start2] = (0,   0, 255)
+        overlay_view[rows, end2  ] = (0,   0, 255)
+        overlay_view[rows, end0  ] = (0, 255, 255)
+
     def inpaint_rod_biharmonic_unused(self, rgb_image, mask_u8):
         # Convert mask to boolean (True where rod is)
         mask_b = mask_u8 > 16
@@ -406,14 +425,14 @@ class Detector(ProcessorBase):
 
         # Original: Dilate by (1, h_dilate_width), blur by (h_dilate_width, 1)
         # Experiment: Dilate by (1, h_dilate_width), blur by (h_dilate_width, 1)
-        h_dilate_width = 15
+        h_dilate_width = 21
         kernel_h = np.ones((3, h_dilate_width), np.uint8)
         wide_mask_u8 = cv2.dilate(wide_mask_u8, kernel_h, iterations=1)
-        h_blur_width = 15
+        h_blur_width = 9
         blur_mask_u8 = cv2.GaussianBlur(wide_mask_u8, (h_blur_width, 3), 0)
 
         if self.view_mask:
-            self.draw_mask(blur_mask_u8, 0)
+            self.draw_mask_outline(blur_mask_u8, 0)
 
         if self.do_inpainting:
             # left0, right0 = self.measure_rod_width(blur_mask_u8,
