@@ -393,7 +393,7 @@ class Detector(ProcessorBase):
 
         rod_x_ctr = int(rod.center())
         roi_x_left, roi_lu, contrast_lu = self.extract_roi(lu, rod_x_ctr)
-        if self.view_mask:
+        if self.view_mask and self.debug:
             self.draw_roi_bounds(roi_x_left, rod_x_ctr)
 
         roi_height = self.roi_height
@@ -431,7 +431,7 @@ class Detector(ProcessorBase):
         h_blur_width = 9
         blur_mask_u8 = cv2.GaussianBlur(wide_mask_u8, (h_blur_width, 3), 0)
 
-        if self.view_mask:
+        if self.view_mask and self.debug:
             self.draw_mask_outline(blur_mask_u8, 0)
 
         if self.do_inpainting:

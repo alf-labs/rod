@@ -9,6 +9,7 @@ class ProcessorBase:
         self.trigger_pause = False
         self.downscale = 1
         self.next_processor_requested = False
+        self.debug = True
 
     def init_size(self, width, height):
         print(f"@@ {self} init_size")

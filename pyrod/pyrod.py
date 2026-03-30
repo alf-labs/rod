@@ -40,6 +40,7 @@ class Main:
     def __init__(self):
         self.mx = 0
         self.my = 0
+        self.debug = True
         self.zoom = 1
         self.skip_num = 1
         self.paused = False
@@ -59,16 +60,20 @@ class Main:
         fps = 1/loop_s if loop_s > 0 else 0
         ms = int(loop_s * 1000)
         text = f"[{frame_count:05d}] {self.mx:03d} x, {ms} ms, {fps:.2f} fps"
-        z = self.zoom
-        cv2.putText(dest, text,
-            (10 * z, 30 * z),           # bottom-left coord
-            cv2.FONT_HERSHEY_DUPLEX,    # font
-            z,                          # font scale
-            (0, 255, 255),              # color
-            z )                         # line thickness
+        if self.debug:
+            z = self.zoom
+            cv2.putText(dest, text,
+                (10 * z, 30 * z),           # bottom-left coord
+                cv2.FONT_HERSHEY_DUPLEX,    # font
+                z,                          # font scale
+                (0, 255, 255),              # color
+                z )                         # line thickness
+        elif frame_count % 10 == 0:
+            print(text)
 
     def parseArgs(self):
         parser = argparse.ArgumentParser(description="PyRod")
+        parser.add_argument("-d", "--no-debug", action="store_true", help="Disable Debug Overlay")
         parser.add_argument("-i", "--input", default="0", help="Input video")
         parser.add_argument("-o", "--output", default=OUT_VIDEO_FILE_PATH, help="Output video")
         parser.add_argument("-n", "--no-video", action="store_true", help="Skip Video Output")
@@ -191,6 +196,7 @@ class Main:
             loop_s = 0
             init_once = True
             processor = None
+            self.debug = not args.no_debug
             self.paused = False
 
             do_crop = self.do_crop
@@ -221,6 +227,8 @@ class Main:
                     self.processors.append( Detector(processor, inpainting=False) )
                 else:
                     self.processors.append( Detector(processor) )
+            for p in self.processors:
+                p.debug = self.debug
             print(f"@@ Start with processor #{processor_idx}: {processor}")
 
             if args.no_video == False:
@@ -295,10 +303,13 @@ class Main:
 
                     self.print_fps(loop_s, frame_count, processor.overlay)
 
-                if self.view_org:
-                    show_frame = processor.combine_overlay(frame)
+                if self.debug:
+                    if self.view_org:
+                        show_frame = processor.combine_overlay(frame)
+                    else:
+                        show_frame = processor.combine_overlay(result)
                 else:
-                    show_frame = processor.combine_overlay(result)
+                    show_frame = result
                 cv2.imshow(WINDOW_TITLE, show_frame)
 
                 if self.single_frame:

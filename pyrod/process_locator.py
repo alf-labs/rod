@@ -231,34 +231,34 @@ class LocatorGen(LocatorBase):
             best = temp_best.rod
             # print(f"@@ Best: {temp_best}")
 
-        # DEBUG draw
-        y = self.height - GRAPH_Y_OFFSET
-        ys = y - 255
-        for t in self.temporal_tracker.tracks:
-            color = (0, 0, 255) if t.id == best_id else (255, 255, 0)
+        if self.debug:
+            y = self.height - GRAPH_Y_OFFSET
+            ys = y - 255
+            for t in self.temporal_tracker.tracks:
+                color = (0, 0, 255) if t.id == best_id else (255, 255, 0)
 
-            iou = 0
-            if self.current_rod is not None:
-                iou = t.rod.iou(self.current_rod)
+                iou = 0
+                if self.current_rod is not None:
+                    iou = t.rod.iou(self.current_rod)
 
-            # ys = y - min(max(int(950 - t.rod.score), 0), 255)
-            ys -= 5
-            text1 = f"{iou:4.2f}"
-            text2 = f"{t.rod.score:4.3f}"
-            cv2.line(self.overlay, (int(t.rod.left), ys), (int(t.rod.right), ys), color, 3)
-            ys -= 10
-            cv2.putText(self.overlay, text2,
-                (int(t.rod.left), ys),      # bottom-left coord
-                cv2.FONT_HERSHEY_DUPLEX,    # font
-                .75,                        # font scale
-                color,                      # color
-                1 )                         # line thickness
-            cv2.putText(self.overlay, text1,
-                (int(t.rod.left), ys - 30), # bottom-left coord
-                cv2.FONT_HERSHEY_DUPLEX,    # font
-                .75,                        # font scale
-                color,                      # color
-                1 )                         # line thickness
+                # ys = y - min(max(int(950 - t.rod.score), 0), 255)
+                ys -= 5
+                text1 = f"{iou:4.2f}"
+                text2 = f"{t.rod.score:4.3f}"
+                cv2.line(self.overlay, (int(t.rod.left), ys), (int(t.rod.right), ys), color, 3)
+                ys -= 10
+                cv2.putText(self.overlay, text2,
+                    (int(t.rod.left), ys),      # bottom-left coord
+                    cv2.FONT_HERSHEY_DUPLEX,    # font
+                    .75,                        # font scale
+                    color,                      # color
+                    1 )                         # line thickness
+                cv2.putText(self.overlay, text1,
+                    (int(t.rod.left), ys - 30), # bottom-left coord
+                    cv2.FONT_HERSHEY_DUPLEX,    # font
+                    .75,                        # font scale
+                    color,                      # color
+                    1 )                         # line thickness
 
         return best
 
@@ -362,26 +362,27 @@ class LocatorGen(LocatorBase):
 
             cv_mask = cv_lu_inv >= peak_threshold
             cv_peaks = cv_lu_inv * cv_mask
-            # self.draw_line(self.y_np_vector(bt_cv), 0, -1, (128, 128, 128), self.overlay)
-            self.draw_line(cv_lu_inv * 255, 0, -1, (0, 165, 255), self.overlay)
-            self.draw_line(cv_peaks  * 255, 0, -1, (0, 255, 255), self.overlay)
-            self.draw_threshold(peak_threshold * 255, (0, 255, 0), self.overlay)
+            if self.debug:
+                # self.draw_line(self.y_np_vector(bt_cv), 0, -1, (128, 128, 128), self.overlay)
+                self.draw_line(cv_lu_inv * 255, 0, -1, (0, 165, 255), self.overlay)
+                self.draw_line(cv_peaks  * 255, 0, -1, (0, 255, 255), self.overlay)
+                self.draw_threshold(peak_threshold * 255, (0, 255, 0), self.overlay)
 
             new_rod = self.find_rod_peaks(cv_peaks)
             if new_rod is not None:
                 self.current_rod = new_rod
                 self.append_frame_rod( new_rod.dupAtFrame(frame_index, tunnel_metric) )
 
-        # text = f"threshold {peak_threshold:4.3f}, bt_cv_median {bt_cv_median:4.3f}"
-        text = f"threshold: {self.last_threshold:4.3f}, tunnel: {tunnel_metric:4.3f}"
-        cv2.putText(self.overlay, text,
-            (10, 60),           # bottom-left coord
-            cv2.FONT_HERSHEY_DUPLEX,    # font
-            .75,                          # font scale
-            (255, 255, 0),              # color
-            1 )                         # line thickness
-
-        self.draw_rod(self.current_rod, new_rod is not None)
+        if self.debug:
+            # text = f"threshold {peak_threshold:4.3f}, bt_cv_median {bt_cv_median:4.3f}"
+            text = f"threshold: {self.last_threshold:4.3f}, tunnel: {tunnel_metric:4.3f}"
+            cv2.putText(self.overlay, text,
+                (10, 60),           # bottom-left coord
+                cv2.FONT_HERSHEY_DUPLEX,    # font
+                .75,                          # font scale
+                (255, 255, 0),              # color
+                1 )                         # line thickness
+            self.draw_rod(self.current_rod, new_rod is not None)
 
         return cv2.cvtColor(lu, cv2.COLOR_GRAY2BGR)
 
@@ -422,7 +423,8 @@ class LocatorRdr(LocatorBase):
     def filter(self, frame_index, frame):
         if frame_index >= 0 and frame_index < len(self.frame_rods):
             rod = self.frame_rods[frame_index]
-            self.draw_rod(rod)
+            if self.debug:
+                self.draw_rod(rod)
         return frame
 
     def export(self):
