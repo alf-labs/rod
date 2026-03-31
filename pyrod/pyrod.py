@@ -9,6 +9,7 @@ IS_RPI = os.path.isfile("/etc/rpi-issue")
 import argparse
 import base64
 import json
+import os
 import re
 import sys
 import time
@@ -95,7 +96,7 @@ class Main:
             self.input_path = IN_VIDEOS[input_idx % len(IN_VIDEOS)]
         if args.locator:
             self.locator_path = args.locator
-            path_name = re.sub(r"(\D+).*", r"\1", args.locator) # stop at first digit
+            path_name = re.sub(r"(\D+).*", r"\1", os.path.basename(args.locator)) # stop at first digit
         self.output_path = f"{args.output}".replace("NAME", path_name)
         self.output_path = self.output_path.replace("IDX", str(input_idx))
         self.output_path = re.sub(r"__+", r"_", self.output_path)
