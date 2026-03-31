@@ -82,9 +82,11 @@ class Main:
         parser.add_argument("-0", "--locator-only", action="store_true", help="Only run locator process")
         parser.add_argument("-1", "--detector-preview", action="store_true", help="Run detector in preview (no inpaint)")
         parser.add_argument("-c", "--crop", action="store_true", help="Center Crop Large Video to 1920x1080")
-        parser.add_argument("-s", "--start", default="0", help="Start frame")
-        parser.add_argument("-e", "--end", default="0", help="End/loop frame")
+        parser.add_argument("-s", "--start", type=int, default=0, help="Start frame")
+        parser.add_argument("-e", "--end", type=int, default=0, help="End/loop frame")
         parser.add_argument("-p", "--inpaint", default="left", choices=["left", "right", "mix", "telea", "navier"], help="Inpaint algorithm")
+        parser.add_argument(      "--rod-dilate-px", type=int, default=21, help="Dilate filter kernel after rod detection")
+        parser.add_argument(      "--rod-blur-px", type=int, default=9, help="Blur filter kernel after rod detection")
         args = parser.parse_args()
         self.args = args
 
@@ -103,10 +105,8 @@ class Main:
         self.export_path = self.output_path.replace(".mp4", "") + ".json"
         print("Input:", self.input_path)
         print("Output:", self.output_path, "(disabled by -n)" if args.no_video else "")
-        if args.start.isdigit():
-            self.start_frame = int(args.start)
-        if args.end.isdigit():
-            self.end_loop_frame = int(args.end)
+        self.start_frame = int(args.start)
+        self.end_loop_frame = int(args.end)
         self.do_crop = args.crop
         return args
 
@@ -232,7 +232,10 @@ class Main:
                 if args.detector_preview:
                     self.processors.append( Detector(processor, inpainting=None) )
                 else:
-                    self.processors.append( Detector(processor, inpainting=args.inpaint) )
+                    self.processors.append( Detector(processor,
+                        inpainting=args.inpaint,
+                        rod_dilate_px=args.rod_dilate_px,
+                        rod_blur_px=args.rod_blur_px) )
             for p in self.processors:
                 p.debug = self.debug
             print(f"@@ Start with processor #{processor_idx}: {processor}")

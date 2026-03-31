@@ -12,20 +12,21 @@ SKEW_PCT = 45/180
 
 
 class Detector(ProcessorBase):
-    def __init__(self, locator, inpainting="left"):
+    def __init__(self, locator, inpainting="left", rod_dilate_px=21, rod_blur_px=9):
         super().__init__()
         self.frame_rods = locator.frame_rods
         self.clahe = cv2.createCLAHE(clipLimit=1.5, tileGridSize=(8, 8))
         self.history_mask = None
         self.view_mask = inpainting is None
         self.inpaint_method = {
-            "left": self.inpaint_manual_left,
-            "right": self.inpaint_manual_right,
-            "mix": self.inpaint_manual_mix,
-            "telea": self.inpaint_telea,
+            "left":   self.inpaint_manual_left,
+            "right":  self.inpaint_manual_right,
+            "mix":    self.inpaint_manual_mix,
+            "telea":  self.inpaint_telea,
             "navier": self.inpaint_navier,
         }.get(inpainting, None)
-
+        self.rod_dilate_kernel = np.ones((3, rod_dilate_px), np.uint8)
+        self.rod_blur_ksize = (rod_blur_px, 3)
 
     def init_size(self, width, height):
         super().init_size(width, height)
@@ -92,19 +93,6 @@ class Detector(ProcessorBase):
 
         return mask_u8
 
-    def temporal_smooth_mask_f32(self, mask_f32, history_mask, weight_new):
-        if history_mask is None:
-            new_history = mask_f32
-        else:
-            # Weighted average: history + new evidence
-            new_history = cv2.addWeighted(mask_f32, weight_new, history_mask, 1.0 - weight_new, 0)
-
-        # To get a binary mask back, we threshold the 'probability'
-        # Only pixels that have been 'white' consistently stay above 0.5
-        mask_u8 = (new_history > 0.75).astype(np.uint8) * 255
-
-        return new_history, mask_u8
-
     def temporal_smooth_mask_u8(self, mask_u8, history_u8, weight_u8):
         if history_u8 is None:
             return mask_u8, mask_u8
@@ -136,12 +124,16 @@ class Detector(ProcessorBase):
 
         return flood_mask[1:-1, 1:-1] * 255
 
-    def draw_mask(self, mask, roi_x_left):
+    def draw_mask_heatmap(self, mask, roi_x_left):
         height, width = mask.shape
         overlay_view = self.overlay[-height:, roi_x_left:roi_x_left + width]
-        overlay_view[mask >    1] = (0, 255, 255)
-        overlay_view[mask >  128] = (0, 128, 255)
-        overlay_view[mask == 255] = (0,   0, 255)
+        # overlay_view[mask >    1] = (0, 255, 255)
+        # overlay_view[mask >  128] = (0, 128, 255)
+        # overlay_view[mask == 255] = (0,   0, 255)
+        # Fill the overlay with (0, mask, 255)
+        overlay_view[:, :, 0] = 0
+        overlay_view[:, :, 1] = mask
+        overlay_view[:, :, 2] = 255
 
     def draw_mask_outline(self, mask_u8, roi_x_left):
         h, w = mask_u8.shape
@@ -297,7 +289,6 @@ class Detector(ProcessorBase):
         wide_roi_rgb = self.inpaint_manual_right(wide_roi_rgb, blur_mask_u8, mask_transform)
         return wide_roi_rgb
 
-
     def apply_masked_blur(self, rgb, mask_u8, ksize=(15, 15), sigma=0):
         """Applies Gaussian Blur to an image based on a gradient mask."""
         blurred_rgb = cv2.GaussianBlur(rgb, ksize, sigma)
@@ -328,8 +319,6 @@ class Detector(ProcessorBase):
 
         rod_x_ctr = int(rod.center())
         roi_x_left, roi_lu, contrast_lu = self.extract_roi(lu, rod_x_ctr)
-        if self.view_mask and self.debug:
-            self.draw_roi_bounds(roi_x_left, rod_x_ctr)
 
         roi_height = self.roi_height
 
@@ -360,18 +349,19 @@ class Detector(ProcessorBase):
 
         # Original: Dilate by (1, h_dilate_width), blur by (h_dilate_width, 1)
         # Experiment: Dilate by (1, h_dilate_width), blur by (h_dilate_width, 1)
-        h_dilate_width = 21
-        kernel_h = np.ones((3, h_dilate_width), np.uint8)
-        wide_mask_u8 = cv2.dilate(wide_mask_u8, kernel_h, iterations=1)
-        h_blur_width = 9
-        blur_mask_u8 = cv2.GaussianBlur(wide_mask_u8, (h_blur_width, 3), 0)
+        wide_mask_u8 = cv2.dilate(wide_mask_u8, self.rod_dilate_kernel, iterations=1)
+        blur_mask_u8 = cv2.GaussianBlur(wide_mask_u8, self.rod_blur_ksize, 0)
 
         if self.view_mask and self.debug:
+            # self.draw_mask_heatmap(mask_u8, roi_x_left)
             self.draw_mask_outline(blur_mask_u8, 0)
 
         if self.inpaint_method:
             inpainted = self.inpaint_method(wide_roi_rgb, blur_mask_u8)
             frame[-roi_height:, :] = inpainted
+
+        if self.view_mask and self.debug:
+            self.draw_roi_bounds(roi_x_left, rod_x_ctr)
 
         if self.view_mask:
             return cv2.cvtColor(lu, cv2.COLOR_GRAY2BGR)
