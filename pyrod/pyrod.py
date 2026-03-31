@@ -9,6 +9,7 @@ IS_RPI = os.path.isfile("/etc/rpi-issue")
 import argparse
 import base64
 import json
+import re
 import sys
 import time
 
@@ -32,7 +33,7 @@ IN_VIDEOS = [
     "../samples/rod1_rear_randall_up_2025-03-23.mp4",
 ]
 
-OUT_VIDEO_FILE_PATH = "output/outputIDX_%s.mp4" % time.strftime("%Y-%m-%d_%H-%M-%S")
+OUT_VIDEO_FILE_PATH = "output/NAME_IDX_%s.mp4" % time.strftime("%Y-%m-%d_%H-%M-%S")
 
 
 class Main:
@@ -73,7 +74,7 @@ class Main:
     def parseArgs(self):
         parser = argparse.ArgumentParser(description="PyRod")
         parser.add_argument("-d", "--no-debug", action="store_true", help="Disable Debug Overlay")
-        parser.add_argument("-i", "--input", default="0", help="Input video")
+        parser.add_argument("-i", "--input", default="", help="Input video")
         parser.add_argument("-o", "--output", default=OUT_VIDEO_FILE_PATH, help="Output video")
         parser.add_argument("-n", "--no-video", action="store_true", help="Skip Video Output")
         parser.add_argument("-l", "--locator", default="", help="Locator JSON data to read back")
@@ -86,14 +87,18 @@ class Main:
         args = parser.parse_args()
         self.args = args
 
-        input_idx = "_"
+        input_idx = ""
+        path_name = "output"
         self.input_path = args.input
         if self.input_path.isdigit():
             input_idx = int(self.input_path)
             self.input_path = IN_VIDEOS[input_idx % len(IN_VIDEOS)]
-        self.output_path = f"{args.output}".replace("IDX", str(input_idx))
         if args.locator:
             self.locator_path = args.locator
+            path_name = re.sub(r"(\D+).*", r"\1", args.locator) # stop at first digit
+        self.output_path = f"{args.output}".replace("NAME", path_name)
+        self.output_path = self.output_path.replace("IDX", str(input_idx))
+        self.output_path = re.sub(r"__+", r"_", self.output_path)
         self.export_path = self.output_path.replace(".mp4", "") + ".json"
         print("Input:", self.input_path)
         print("Output:", self.output_path, "(disabled by -n)" if args.no_video else "")

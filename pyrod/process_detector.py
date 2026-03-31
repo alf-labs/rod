@@ -168,7 +168,7 @@ class Detector(ProcessorBase):
     def inpaint_navier(self, wide_roi_rgb, blur_mask_u8):
         return cv2.inpaint(wide_roi_rgb, blur_mask_u8, inpaintRadius=5, flags=cv2.INPAINT_NS)
 
-    def inpaint_manual_left(self, wide_roi_rgb, blur_mask_u8):
+    def inpaint_manual_left(self, wide_roi_rgb, blur_mask_u8, mask_transform=None):
         h, w, _ = wide_roi_rgb.shape
 
         for y in range(h-1, 0, -1):
@@ -178,50 +178,124 @@ class Detector(ProcessorBase):
             index255 = np.where(blur_row == 255)[0]
             if len(index255) == 0:
                 break  # no more rod
-            left255 = index255[0]
-            right255 = index255[-1]
-            rw = right255 - left255
+            left2 = index255[0]
+            right2 = index255[-1]
+            w2 = right2 - left2
 
             threshold = 1
-            left0 = np.argmax(blur_row[:left255] > threshold)
-            right0 = right255 + np.argmax(blur_row[right255:] <= threshold)
+            left0 = np.argmax(blur_row[:left2] > threshold)
+            right0 = right2 + np.argmax(blur_row[right2:] <= threshold)
             w0 = right0 - left0
 
-            # # Version A: copy L2-R2 mirrored as-is, no blur.
-            # src_row = rgb_row[left255 - 1 : left255 - rw - 1 : -1, :]
-            # rgb_row[left255:right255] = src_row[:]
+            # "left" means we just mirror columns on the left (L2) part of the rod.
+            # Destination: L2 -> (plateau) R2 (a W2 width) --> (gradient) R0
+            # A mirror on L2: (x) -> 2*L2-x
+            # Source: L2 -> (plateau) 2*L2-R2 --> (gradient) -> 2*L2 - R0, step -1.
 
-            # Version B: copy L2-Ro mirrored on L2, as-is, no blur.
+            # # Version A: copy L2-R2 mirrored as-is, no blur (same as right).
+            # src_row = rgb_row[left2 : left2 - w2 : -1, :]
+            # rgb_row[left2:right2] = src_row[:]
+
+            # Version B: copy L2-R0 mirrored on L2, as-is, no blur.
             # Note that we do NOT mirror the L0-L2 part as it _must_ contain the rod.
-            src_row = rgb_row[left255 : 2*left255 - right0 : -1, :]
-            rgb_row[left255 : right0] = src_row[:]
+            src_row = rgb_row[left2 : 2*left2 - right0 : -1, :]
+            rgb_row[left2 : right0] = src_row[:]
 
             # # Version C: same as B but apply blur mask in uint16 space
-            mask_u8 = blur_row[left255 : right0, None].astype(np.uint16)
+            mask_u8 = blur_row[left2 : right0, None].astype(np.uint16)
+            if mask_transform:  # see "mix" version
+                mask_u8 = mask_transform(mask_u8)
             src_row_u16 = src_row.astype(np.uint16)
-            dst_row_u16 = rgb_row[left255 : right0].astype(np.uint16)
+            dst_row_u16 = rgb_row[left2 : right0].astype(np.uint16)
             # print(f"@@ mask_u8.shape={mask_u8.shape}, src_row_u16.shape={src_row_u16.shape}, dst_row_u16.shape={dst_row_u16.shape}")
             blended = (
                     dst_row_u16 * (255 - mask_u8)
                     + src_row_u16 * mask_u8
                 ) // 255
-            rgb_row[left255 : right0] = blended.astype(np.uint8)
+            rgb_row[left2 : right0] = blended.astype(np.uint8)
 
             # # DEBUG
-            # rgb_row[left0] = (255, 0, 0)
+            # rgb_row[left0]  = (255, 0, 0)
             # rgb_row[right0] = (255, 0, 0)
-            # rgb_row[left255] = (0, 255, 0)
-            # rgb_row[right255] = (0, 255, 0)
+            # rgb_row[left2]  = (0, 255, 0)
+            # rgb_row[right2] = (0, 255, 0)
 
         return wide_roi_rgb
 
-    def inpaint_manual_right(self, wide_roi_rgb, blur_mask_u8):
-        # TBD
-        return self.inpaint_manual_left(wide_roi_rgb, blur_mask_u8)
+    def inpaint_manual_right(self, wide_roi_rgb, blur_mask_u8, mask_transform=None):
+        h, w, _ = wide_roi_rgb.shape
+
+        for y in range(h-1, 0, -1):
+            blur_row = blur_mask_u8[y, :]
+            rgb_row = wide_roi_rgb[y, :]
+
+            index255 = np.where(blur_row == 255)[0]
+            if len(index255) == 0:
+                break  # no more rod
+            left2 = index255[0]
+            right2 = index255[-1]
+            w2 = right2 - left2
+
+            threshold = 1
+            left0 = np.argmax(blur_row[:left2] > threshold)
+            right0 = right2 + np.argmax(blur_row[right2:] <= threshold)
+            w0 = right0 - left0
+
+            # "right" means we just mirror columns on the right (R2) part of the rod.
+            # Destination: L0 (gradient) -> L2 -> (plateau) R2 (a W2 width)
+            # A mirror on R2: (x) -> 2*R2-x
+            # Source: 2*R2 - L0 (gradient) -> 2*R2 - L2 (plateau) --> (gradient) R2, step -1.
+
+            # # Version A: copy L2-R2 mirrored as-is, no blur (same as left).
+            # src_row = rgb_row[left2 : left2 - w2 : -1, :]
+            # rgb_row[left2:right2] = src_row[:]
+
+            # Version B: copy L0-R2 mirrored on R2, as-is, no blur.
+            # Note that we do NOT mirror the R2->R0 part as it _must_ contain the rod.
+            src_row = rgb_row[2*right2 - left0 : right2 : -1, :]
+            rgb_row[left0 : right2] = src_row[:]
+
+            # # Version C: same as B but apply blur mask in uint16 space
+            mask_u8 = blur_row[left0 : right2, None].astype(np.uint16)
+            if mask_transform:  # see "mix" version
+                mask_u8 = mask_transform(mask_u8)
+            src_row_u16 = src_row.astype(np.uint16)
+            dst_row_u16 = rgb_row[left0 : right2].astype(np.uint16)
+            # print(f"@@ mask_u8.shape={mask_u8.shape}, src_row_u16.shape={src_row_u16.shape}, dst_row_u16.shape={dst_row_u16.shape}")
+            blended = (
+                    dst_row_u16 * (255 - mask_u8)
+                    + src_row_u16 * mask_u8
+                ) // 255
+            rgb_row[left0 : right2] = blended.astype(np.uint8)
+
+            # # DEBUG
+            # rgb_row[left0]  = (255, 0, 0)
+            # rgb_row[right0] = (255, 0, 0)
+            # rgb_row[left2]  = (0, 255, 0)
+            # rgb_row[right2] = (0, 255, 0)
+
+        return wide_roi_rgb
 
     def inpaint_manual_mix(self, wide_roi_rgb, blur_mask_u8):
-        # TBD
-        return self.inpaint_manual_left(wide_roi_rgb, blur_mask_u8)
+        # "mix" means we do mirror from the left *and* the right, and then average:
+        # We take both the L0 gradient from the "left" algorithm,
+        # and the R0 gradient from the "right" algorithm,
+        # however the middle L2->R2 part is a plateau averaging left+right.
+        # (another variation is to treat is a cross-over gradient, but that implies more copies)
+
+        # The trick used is that we reuse the left/right inpainting but just before
+        # applying the uint16 mask we transform it by changing the plateau 255 values to 127.
+        # This halves the plateau values and combines both left and right.
+        # (technicall 127*2=254 so we loose 1/256th luminosity)
+        # We cannot do that upfront on blur_mask_u8 as we need the 255 values intact for the
+        # left/right boundary detection.
+
+        def mask_transform(mask_u16):
+            mask_u16[mask_u16 == 255] = 127
+            return mask_u16
+        wide_roi_rgb = self.inpaint_manual_left(wide_roi_rgb, blur_mask_u8, mask_transform)
+        wide_roi_rgb = self.inpaint_manual_right(wide_roi_rgb, blur_mask_u8, mask_transform)
+        return wide_roi_rgb
 
 
     def apply_masked_blur(self, rgb, mask_u8, ksize=(15, 15), sigma=0):
