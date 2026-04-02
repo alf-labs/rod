@@ -34,7 +34,7 @@ IN_VIDEOS = [
     "../samples/rod1_rear_randall_up_2025-03-23.mp4",
 ]
 
-OUT_VIDEO_FILE_PATH = "output/NAME_IDX_%s.mp4" % time.strftime("%Y-%m-%d_%H-%M-%S")
+OUT_VIDEO_FILE_PATH = "output/NAME_IDX_TIME.mp4"
 
 
 class Main:
@@ -82,8 +82,8 @@ class Main:
         parser.add_argument("-0", "--locator-only", action="store_true", help="Only run locator process")
         parser.add_argument("-1", "--detector-preview", action="store_true", help="Run detector in preview (no inpaint)")
         parser.add_argument("-c", "--crop", action="store_true", help="Center Crop Large Video to 1920x1080")
-        parser.add_argument("-s", "--start", type=int, default=0, help="Start frame")
-        parser.add_argument("-e", "--end", type=int, default=0, help="End/loop frame")
+        parser.add_argument("-s", "--start", default="0", help="Start frame")
+        parser.add_argument("-e", "--end", default="0", help="End/loop frame")
         parser.add_argument("-p", "--inpaint", default="left", choices=["left", "right", "mix", "telea", "navier"], help="Inpaint algorithm")
         parser.add_argument(      "--rod-dilate-px", type=int, default=21, help="Dilate filter kernel after rod detection")
         parser.add_argument(      "--rod-blur-px", type=int, default=9, help="Blur filter kernel after rod detection")
@@ -101,14 +101,35 @@ class Main:
             path_name = re.sub(r"(\D+).*", r"\1", os.path.basename(args.locator)) # stop at first digit
         self.output_path = f"{args.output}".replace("NAME", path_name)
         self.output_path = self.output_path.replace("IDX", str(input_idx))
+        self.output_path = self.output_path.replace("TIME", time.strftime("%Y-%m-%d_%H-%M-%S"))
         self.output_path = re.sub(r"__+", r"_", self.output_path)
-        self.export_path = self.output_path.replace(".mp4", "") + ".json"
+        self.export_path = self.output_path.replace(".mp4", "").replace(".MP4", "") + ".json"
         print("Input:", self.input_path)
         print("Output:", self.output_path, "(disabled by -n)" if args.no_video else "")
-        self.start_frame = int(args.start)
-        self.end_loop_frame = int(args.end)
+        self.start_frame = self.parseFrameTimestamp(args.start)
+        self.end_loop_frame = self.parseFrameTimestamp(args.end)
         self.do_crop = args.crop
         return args
+
+    def parseFrameTimestamp(self, ts_str):
+        if ts_str.isdigit():
+            # Just a number: this represents a frame number
+            return int(ts_str)
+        # The following formats represent an hour:minute:second timestamp.
+        #   "12:34:45" or "34:45"
+        #   "1h23m45s" or "23m45s" or "45s"
+        # We just return a tuple (NN, "seconds") and will convert it to an integer once
+        # the know the frame rate of the input video.
+        pattern1 = r"^(?:(?P<h>\d+):)?(?P<m>\d{1,2}):(?P<s>\d{1,2})$"
+        match = re.search(pattern1, ts_str)
+        if match is None:
+            pattern2 = r"^(?:(?P<h>\d+)h)?(?:(?P<m>\d{1,2})m)(?P<s>\d{1,2})s$"
+            match = re.search(pattern1, ts_str)
+        if match:
+            h = match.group("h") or 0
+            m = match.group("m") or 0
+            s = match.group("s") or 0
+            return ( int(h) * 3600 + int(m) * 60 + int(s), "seconds" )
 
     def parseKeys(self, processor, wait_ms=1):
         if self.paused:
@@ -204,6 +225,13 @@ class Main:
             processor = None
             self.debug = not args.no_debug
             self.paused = False
+
+            if isinstance(self.start_frame, tuple):
+                print(f"@@ Start frame: {self.start_frame} --> frame {self.start_frame[0] * fps}")
+                self.start_frame = int(self.start_frame[0] * fps)
+            if isinstance(self.end_loop_frame, tuple):
+                print(f"@@ End frame: {self.end_loop_frame} --> frame {self.end_loop_frame[0] * fps}")
+                self.end_loop_frame = int(self.end_loop_frame[0] * fps)
 
             do_crop = self.do_crop
             cropped_width = vid_width

@@ -9,5 +9,5 @@ source $V/Scripts/activate
 
 echo "Using $(which python)"
 echo
-python pyrod.py $@
+python pyrod.py "$@"
 
