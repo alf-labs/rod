@@ -231,7 +231,7 @@ class LocatorGen(LocatorBase):
             best = temp_best.rod
             # print(f"@@ Best: {temp_best}")
 
-        if self.debug:
+        if self.compute_overlay:
             y = self.height - GRAPH_Y_OFFSET
             ys = y - 255
             for t in self.temporal_tracker.tracks:
@@ -362,7 +362,7 @@ class LocatorGen(LocatorBase):
 
             cv_mask = cv_lu_inv >= peak_threshold
             cv_peaks = cv_lu_inv * cv_mask
-            if self.debug:
+            if self.compute_overlay:
                 # self.draw_line(self.y_np_vector(bt_cv), 0, -1, (128, 128, 128), self.overlay)
                 self.draw_line(cv_lu_inv * 255, 0, -1, (0, 165, 255), self.overlay)
                 self.draw_line(cv_peaks  * 255, 0, -1, (0, 255, 255), self.overlay)
@@ -373,7 +373,7 @@ class LocatorGen(LocatorBase):
                 self.current_rod = new_rod
                 self.append_frame_rod( new_rod.dupAtFrame(frame_index, tunnel_metric) )
 
-        if self.debug:
+        if self.compute_overlay:
             # text = f"threshold {peak_threshold:4.3f}, bt_cv_median {bt_cv_median:4.3f}"
             text = f"threshold: {self.last_threshold:4.3f}, tunnel: {tunnel_metric:4.3f}"
             cv2.putText(self.overlay, text,
@@ -423,12 +423,12 @@ class LocatorRdr(LocatorBase):
     def filter(self, frame_index, frame):
         if frame_index >= 0 and frame_index < len(self.frame_rods):
             rod = self.frame_rods[frame_index]
-            if self.debug:
+            if self.compute_overlay:
                 self.draw_rod(rod)
         return frame
 
     def export(self):
-        return { "locator": self.exported_content }
+        return super().export()
 
     def release(self):
         super().release()

@@ -36,18 +36,24 @@ IN_VIDEOS = [
 
 OUT_VIDEO_FILE_PATH = "output/NAME_IDX_TIME.mp4"
 
+DISPLAY_NONE = 0
+DISPLAY_NO_OVERLAY = 1
+DISPLAY_WITH_OVERLAY = 2
 
 class Main:
     def __init__(self):
         self.mx = 0
         self.my = 0
-        self.debug = True
         self.zoom = 1
         self.skip_num = 1
         self.paused = False
         self.single_frame = False
         self.view_org = False
-        self.allow_export = False
+        self.write_json = True
+        self.write_video = True
+        self.overlay_in_video = False
+        self.compute_overlay = True
+        self.display_mode = DISPLAY_WITH_OVERLAY
         self.quit_requested = False
         self.start_frame = 0
         self.end_loop_frame = 0
@@ -61,7 +67,7 @@ class Main:
         fps = 1/loop_s if loop_s > 0 else 0
         ms = int(loop_s * 1000)
         text = f"[{frame_count:05d}] {self.mx:03d} x, {ms} ms, {fps:.2f} fps"
-        if self.debug:
+        if self.compute_overlay:
             z = self.zoom
             cv2.putText(dest, text,
                 (10 * z, 30 * z),           # bottom-left coord
@@ -69,15 +75,17 @@ class Main:
                 z,                          # font scale
                 (0, 255, 255),              # color
                 z )                         # line thickness
-        elif frame_count % 10 == 0:
+        if self.display_mode != DISPLAY_WITH_OVERLAY and frame_count % 100 == 0:
             print(text)
 
     def parseArgs(self):
         parser = argparse.ArgumentParser(description="PyRod")
-        parser.add_argument("-d", "--no-debug", action="store_true", help="Disable Debug Overlay")
+        parser.add_argument("-d", "--display", default="full", choices=["none", "prod", "full"], help="Window Display")
         parser.add_argument("-i", "--input", default="", help="Input video")
         parser.add_argument("-o", "--output", default=OUT_VIDEO_FILE_PATH, help="Output video")
         parser.add_argument("-n", "--no-video", action="store_true", help="Skip Video Output")
+        parser.add_argument(      "--overlay-video", action="store_true", help="Include Overlay in Video Output")
+        parser.add_argument(      "--no-json", action="store_true", help="Skip JSON Export")
         parser.add_argument("-l", "--locator", default="", help="Locator JSON data to read back")
         parser.add_argument("-0", "--locator-only", action="store_true", help="Only run locator process")
         parser.add_argument("-1", "--detector-preview", action="store_true", help="Run detector in preview (no inpaint)")
@@ -92,13 +100,16 @@ class Main:
 
         input_idx = ""
         path_name = "output"
+
         self.input_path = args.input
         if self.input_path.isdigit():
             input_idx = int(self.input_path)
             self.input_path = IN_VIDEOS[input_idx % len(IN_VIDEOS)]
+
         if args.locator:
             self.locator_path = args.locator
             path_name = re.sub(r"(\D+).*", r"\1", os.path.basename(args.locator)) # stop at first digit
+
         self.output_path = f"{args.output}".replace("NAME", path_name)
         self.output_path = self.output_path.replace("IDX", str(input_idx))
         self.output_path = self.output_path.replace("TIME", time.strftime("%Y-%m-%d_%H-%M-%S"))
@@ -106,9 +117,20 @@ class Main:
         self.export_path = self.output_path.replace(".mp4", "").replace(".MP4", "") + ".json"
         print("Input:", self.input_path)
         print("Output:", self.output_path, "(disabled by -n)" if args.no_video else "")
+
         self.start_frame = self.parseFrameTimestamp(args.start)
         self.end_loop_frame = self.parseFrameTimestamp(args.end)
+
         self.do_crop = args.crop
+        self.write_json = not args.no_json
+        self.write_video = not args.no_video
+        self.overlay_in_video = args.overlay_video
+        self.display_mode = {
+            "none": DISPLAY_NONE,
+            "prod": DISPLAY_NO_OVERLAY,
+            "full": DISPLAY_WITH_OVERLAY,
+        }.get(args.display)
+
         return args
 
     def parseFrameTimestamp(self, ts_str):
@@ -166,7 +188,7 @@ class Main:
     def next_processor(self, processor, processor_idx):
         if processor is not None:
             processor.pre_release()
-            if self.allow_export:
+            if self.write_json:
                 self.export_content.update( processor.export() )
             processor.release()
         processor = None
@@ -192,6 +214,9 @@ class Main:
         print("@@ Run")
         args = self.parseArgs()
 
+        stats_start_main_s = time.perf_counter()
+        stats_iterations = 0
+
         if args.locator:
             self.read_json(self.locator_path)
             if "pyrod" in self.export_content:
@@ -202,13 +227,15 @@ class Main:
                 self.do_crop = not not pyrod_data["crop"]
                 print(f"Overriding input to file '{self.input_path}', frames {self.start_frame} to {self.end_loop_frame}, {'cropped' if self.do_crop else 'uncropped'}")
 
-        cv2.namedWindow(WINDOW_TITLE, cv2.WINDOW_NORMAL)
-        cv2.resizeWindow(WINDOW_TITLE, 1920//2, 1080//2)
-        def _mouse_callback(event, x, y, flags, param):
-            if event == cv2.EVENT_MOUSEMOVE:
-                self.mx = x
-                self.my = y
-        cv2.setMouseCallback(WINDOW_TITLE, _mouse_callback)
+        display_mode = self.display_mode
+        if display_mode != DISPLAY_NONE:
+            cv2.namedWindow(WINDOW_TITLE, cv2.WINDOW_NORMAL)
+            cv2.resizeWindow(WINDOW_TITLE, 1920//2, 1080//2)
+            def _mouse_callback(event, x, y, flags, param):
+                if event == cv2.EVENT_MOUSEMOVE:
+                    self.mx = x
+                    self.my = y
+            cv2.setMouseCallback(WINDOW_TITLE, _mouse_callback)
 
         fourcc = cv2.VideoWriter_fourcc(*'mp4v')
         cap = cv2.VideoCapture(self.input_path)
@@ -223,7 +250,7 @@ class Main:
             loop_s = 0
             init_once = True
             processor = None
-            self.debug = not args.no_debug
+            self.compute_overlay = display_mode == DISPLAY_WITH_OVERLAY or self.overlay_in_video
             self.paused = False
 
             if isinstance(self.start_frame, tuple):
@@ -265,19 +292,19 @@ class Main:
                         rod_dilate_px=args.rod_dilate_px,
                         rod_blur_px=args.rod_blur_px) )
             for p in self.processors:
-                p.debug = self.debug
+                p.compute_overlay = self.compute_overlay
             print(f"@@ Start with processor #{processor_idx}: {processor}")
 
-            if args.no_video == False:
-                self.allow_export = True
+            if self.write_video:
                 writer = cv2.VideoWriter(self.output_path, fourcc, fps, (width, height), isColor=True)
+                print(f"@@ Writing {width}x{height}@{fps} fps to", self.output_path)
+            if self.write_json:
                 self.export_content["pyrod"] = {
                     "input_path":   self.input_path,
                     "start_frame":  self.start_frame,
                     "end_frame":    self.end_loop_frame,
                     "crop":         self.do_crop
                 }
-                print(f"@@ Writing {width}x{height}@{fps} fps to", self.output_path)
 
             last_frame = None
             end_reached = False
@@ -286,6 +313,7 @@ class Main:
             print(f"@@ Reader cap isOpened: {cap.isOpened()}, {width}x{height}@{fps} fps")
             cap.set(cv2.CAP_PROP_POS_FRAMES, self.start_frame)
             while cap.isOpened() and not self.quit_requested:
+                stats_iterations += 1
                 self.parseKeys(processor)
                 start_loop_s = time.perf_counter()
                 if self.paused:
@@ -340,22 +368,33 @@ class Main:
 
                     self.print_fps(loop_s, frame_count, processor.overlay)
 
-                if self.debug:
+                original_frame = result
+                overlaid_frame = None
+
+                if display_mode == DISPLAY_NONE:
+                    pass
+                elif display_mode == DISPLAY_NO_OVERLAY:
+                    cv2.imshow(WINDOW_TITLE, original_frame)
+                elif display_mode == DISPLAY_WITH_OVERLAY:
                     if self.view_org:
-                        show_frame = processor.combine_overlay(frame)
+                        overlaid_frame = processor.combine_overlay(frame)
                     else:
-                        show_frame = processor.combine_overlay(result)
-                else:
-                    show_frame = result
-                cv2.imshow(WINDOW_TITLE, show_frame)
+                        overlaid_frame = processor.combine_overlay(original_frame)
+                    cv2.imshow(WINDOW_TITLE, overlaid_frame)
+
+                if self.write_video and not self.paused:
+                    if self.overlay_in_video:
+                        video_frame = overlaid_frame
+                        if video_frame is None:
+                            video_frame = processor.combine_overlay(original_frame)
+                    else:
+                        video_frame = original_frame
+                    if do_downscale == 2:
+                        video_frame = cv2.resize(video_frame, (0,0), fx=2, fy=2, interpolation=cv2.INTER_NEAREST)
+                    writer.write(video_frame)
 
                 if self.single_frame:
                     self.paused = True
-
-                if self.allow_export and not self.paused:
-                    if do_downscale == 2:
-                        show_frame = cv2.resize(show_frame, (0,0), fx=2, fy=2, interpolation=cv2.INTER_NEAREST)
-                    writer.write(show_frame)
 
                 if processor.trigger_pause:
                     print("@@ Detector triggered pause. Space to continue.")
@@ -369,11 +408,19 @@ class Main:
             print("@@ Main loop ended.")
             if writer is not None:
                 writer.release()
-            if self.allow_export:
+            if self.write_json:
                 self.export_json(self.export_path, self.export_content)
             self.next_processor(processor, processor_idx)
             cap.release()
-            cv2.destroyAllWindows()
+            if display_mode != DISPLAY_NONE:
+                cv2.destroyAllWindows()
+
+        stats_end_main_s = time.perf_counter()
+        stats_duration_s = int(stats_end_main_s - stats_start_main_s)
+        stats_iterations = max(1, stats_iterations)
+        stats_ms = 1000.0 * stats_duration_s / stats_iterations
+        stats_fps = stats_iterations / stats_duration_s
+        print(f"@@ Stats: {stats_iterations} frames in {stats_duration_s // 60} min {stats_duration_s % 60} sec; {stats_ms:.2f} ms/frame; {stats_fps:.2f} fps")
 
         print("@@ end")
 

@@ -352,7 +352,7 @@ class Detector(ProcessorBase):
         wide_mask_u8 = cv2.dilate(wide_mask_u8, self.rod_dilate_kernel, iterations=1)
         blur_mask_u8 = cv2.GaussianBlur(wide_mask_u8, self.rod_blur_ksize, 0)
 
-        if self.view_mask and self.debug:
+        if self.view_mask and self.compute_overlay:
             # self.draw_mask_heatmap(mask_u8, roi_x_left)
             self.draw_mask_outline(blur_mask_u8, 0)
 
@@ -360,7 +360,7 @@ class Detector(ProcessorBase):
             inpainted = self.inpaint_method(wide_roi_rgb, blur_mask_u8)
             frame[-roi_height:, :] = inpainted
 
-        if self.view_mask and self.debug:
+        if self.view_mask and self.compute_overlay:
             self.draw_roi_bounds(roi_x_left, rod_x_ctr)
 
         if self.view_mask:
