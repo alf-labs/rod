@@ -92,7 +92,7 @@ class Main:
         parser.add_argument("-c", "--crop", action="store_true", help="Center Crop Large Video to 1920x1080")
         parser.add_argument("-s", "--start", default="0", help="Start frame")
         parser.add_argument("-e", "--end", default="0", help="End/loop frame")
-        parser.add_argument("-p", "--inpaint", default="left", choices=["left", "right", "mix", "telea", "navier"], help="Inpaint algorithm")
+        parser.add_argument("-p", "--inpaint", default="left", choices=["left", "right", "mix", "telea", "navier", "none"], help="Inpaint algorithm")
         parser.add_argument(      "--rod-dilate-px", type=int, default=21, help="Dilate filter kernel after rod detection")
         parser.add_argument(      "--rod-blur-px", type=int, default=9, help="Blur filter kernel after rod detection")
         args = parser.parse_args()

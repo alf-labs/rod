@@ -24,6 +24,7 @@ class Detector(ProcessorBase):
             "mix":    self.inpaint_manual_mix,
             "telea":  self.inpaint_telea,
             "navier": self.inpaint_navier,
+            "none":   self.inpaint_noop,
         }.get(inpainting, None)
         self.rod_dilate_kernel = np.ones((3, rod_dilate_px), np.uint8)
         self.rod_blur_ksize = (rod_blur_px, 3)
@@ -159,6 +160,9 @@ class Detector(ProcessorBase):
 
     def inpaint_navier(self, wide_roi_rgb, blur_mask_u8):
         return cv2.inpaint(wide_roi_rgb, blur_mask_u8, inpaintRadius=5, flags=cv2.INPAINT_NS)
+
+    def inpaint_noop(self, wide_roi_rgb, blur_mask_u8):
+        return wide_roi_rgb
 
     def inpaint_manual_left(self, wide_roi_rgb, blur_mask_u8, mask_transform=None):
         h, w, _ = wide_roi_rgb.shape
