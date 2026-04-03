@@ -24,6 +24,12 @@ class Rod:
     def center(self):
         return (self.left + self.right) / 2
 
+    def recenter(self, new_center):
+        """Update left/right to change the center to the new center."""
+        delta = new_center - self.center()
+        self.left += delta
+        self.right += delta
+
     def width(self):
         return self.right - self.left
 
