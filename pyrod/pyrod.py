@@ -59,6 +59,7 @@ class Main:
         self.end_loop_frame = 0
         self.processors = []
         self.export_content = {}
+        self.should_export = False
         self.locator_path = ""
         self.export_path = ""
         self.do_crop = False
@@ -189,7 +190,9 @@ class Main:
         if processor is not None:
             processor.pre_release()
             if self.write_json:
-                self.export_content.update( processor.export() )
+                new_export = processor.export()
+                self.should_export = self.should_export or new_export
+                self.export_content.update( new_export )
             processor.release()
         processor = None
         processor_idx += 1
@@ -205,7 +208,7 @@ class Main:
         with open(filename, "r") as f:
             self.export_content = json.load(f)
 
-    def export_json(self, filename, content):
+    def write_json(self, filename, content):
         with open(filename, "w") as f:
             json.dump(content, f, indent=2)
         print(f"@@ Export JSON output to {filename}")
@@ -408,8 +411,8 @@ class Main:
             print("@@ Main loop ended.")
             if writer is not None:
                 writer.release()
-            if self.write_json:
-                self.export_json(self.export_path, self.export_content)
+            if self.write_json and self.should_export:
+                self.write_json(self.export_path, self.export_content)
             self.next_processor(processor, processor_idx)
             cap.release()
             if display_mode != DISPLAY_NONE:

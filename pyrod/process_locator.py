@@ -403,7 +403,6 @@ class LocatorGen(LocatorBase):
 class LocatorRdr(LocatorBase):
     def __init__(self):
         super().__init__()
-        self.exported_content = {}
 
     def init_size(self, width, height):
         super().init_size(width, height)
@@ -414,7 +413,6 @@ class LocatorRdr(LocatorBase):
     def read_json(self, exported_content):
         print(f"@@ LocatorRdr JSON load")
         # exported_content should contain one array of Rod.toJson().
-        self.exported_content = exported_content
         for entry in exported_content:
             self.append_frame_rod(Rod.fromJson(entry))
         print(f"@@ LocatorRdr loaded {len(self.frame_rods)} entries from JSON")
