@@ -12,7 +12,7 @@ SKEW_PCT = 45/180
 
 
 class Detector(ProcessorBase):
-    def __init__(self, locator, inpainting="left", rod_dilate_px=21, rod_blur_px=9):
+    def __init__(self, locator, inpainting="left", rod_dilate_px=31, rod_blur_px=31):
         super().__init__()
         self.frame_rods = locator.frame_rods
         self.clahe = cv2.createCLAHE(clipLimit=1.5, tileGridSize=(8, 8))
@@ -155,6 +155,25 @@ class Detector(ProcessorBase):
         overlay_view[rows, end2  ] = (0,   0, 255)
         overlay_view[rows, end0  ] = (0, 255, 255)
 
+    def draw_mask_line(self, mask_u8, roi_x_left, y_mask):
+        _, w = mask_u8.shape
+        overlay_view = self.overlay[:, roi_x_left:roi_x_left + w]
+        h, _, _ = overlay_view.shape
+
+        color = (255, 0, 0)
+        line_u8 = mask_u8[y_mask, :]
+
+        lx = 0
+        ly = int(line_u8[0])
+        dy = int(h - 10)
+        for x in range(1, w):
+            curr = int(line_u8[x])
+            cv2.line(overlay_view, (lx, dy - ly), (x, dy - curr), color, 2)
+            lx = x
+            ly = curr
+
+
+
     def inpaint_telea(self, wide_roi_rgb, blur_mask_u8):
         return cv2.inpaint(wide_roi_rgb, blur_mask_u8, inpaintRadius=5, flags=cv2.INPAINT_TELEA)
 
@@ -188,14 +207,14 @@ class Detector(ProcessorBase):
             # A mirror on L2: (x) -> 2*L2-x
             # Source: L2 -> (plateau) 2*L2-R2 --> (gradient) -> 2*L2 - R0, step -1.
 
-            # # Version A: copy L2-R2 mirrored as-is, no blur (same as right).
+            # # Version A: copy L2-R2 mirrored as-is, no blur (same as right).q
             # src_row = rgb_row[left2 : left2 - w2 : -1, :]
-            # rgb_row[left2:right2] = src_row[:]
+            # Version A: rgb_row[left2:right2] = src_row[:]
 
             # Version B: copy L2-R0 mirrored on L2, as-is, no blur.
             # Note that we do NOT mirror the L0-L2 part as it _must_ contain the rod.
             src_row = rgb_row[left2 : 2*left2 - right0 : -1, :]
-            rgb_row[left2 : right0] = src_row[:]
+            # Version B: rgb_row[left2 : right0] = src_row[:]
 
             # # Version C: same as B but apply blur mask in uint16 space
             mask_u8 = blur_row[left2 : right0, None].astype(np.uint16)
@@ -209,12 +228,6 @@ class Detector(ProcessorBase):
                     + src_row_u16 * mask_u8
                 ) // 255
             rgb_row[left2 : right0] = blended.astype(np.uint8)
-
-            # # DEBUG
-            # rgb_row[left0]  = (255, 0, 0)
-            # rgb_row[right0] = (255, 0, 0)
-            # rgb_row[left2]  = (0, 255, 0)
-            # rgb_row[right2] = (0, 255, 0)
 
         return wide_roi_rgb
 
@@ -244,12 +257,12 @@ class Detector(ProcessorBase):
 
             # # Version A: copy L2-R2 mirrored as-is, no blur (same as left).
             # src_row = rgb_row[left2 : left2 - w2 : -1, :]
-            # rgb_row[left2:right2] = src_row[:]
+            # Version A: rgb_row[left2:right2] = src_row[:]
 
             # Version B: copy L0-R2 mirrored on R2, as-is, no blur.
             # Note that we do NOT mirror the R2->R0 part as it _must_ contain the rod.
             src_row = rgb_row[2*right2 - left0 : right2 : -1, :]
-            rgb_row[left0 : right2] = src_row[:]
+            # Version B: rgb_row[left0 : right2] = src_row[:]
 
             # # Version C: same as B but apply blur mask in uint16 space
             mask_u8 = blur_row[left0 : right2, None].astype(np.uint16)
@@ -263,12 +276,6 @@ class Detector(ProcessorBase):
                     + src_row_u16 * mask_u8
                 ) // 255
             rgb_row[left0 : right2] = blended.astype(np.uint8)
-
-            # # DEBUG
-            # rgb_row[left0]  = (255, 0, 0)
-            # rgb_row[right0] = (255, 0, 0)
-            # rgb_row[left2]  = (0, 255, 0)
-            # rgb_row[right2] = (0, 255, 0)
 
         return wide_roi_rgb
 
@@ -357,8 +364,9 @@ class Detector(ProcessorBase):
         blur_mask_u8 = cv2.GaussianBlur(wide_mask_u8, self.rod_blur_ksize, 0)
 
         if self.view_mask and self.compute_overlay:
-            # self.draw_mask_heatmap(mask_u8, roi_x_left)
+            # self.draw_mask_heatmap(blur_mask_u8, 0)
             self.draw_mask_outline(blur_mask_u8, 0)
+            self.draw_mask_line(blur_mask_u8, 0, -10)
 
         if self.inpaint_method:
             inpainted = self.inpaint_method(wide_roi_rgb, blur_mask_u8)
