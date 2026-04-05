@@ -62,7 +62,7 @@ class Main:
         self.should_export = False
         self.locator_path = ""
         self.export_path = ""
-        self.do_crop = False
+        self.crop_roi = {}
 
     def print_fps(self, loop_s, frame_count, dest):
         fps = 1/loop_s if loop_s > 0 else 0
@@ -90,7 +90,7 @@ class Main:
         parser.add_argument("-l", "--locator", default="", help="Locator JSON data to read back")
         parser.add_argument("-0", "--locator-only", action="store_true", help="Only run locator process")
         parser.add_argument("-1", "--detector-preview", action="store_true", help="Run detector in preview (no inpaint)")
-        parser.add_argument("-c", "--crop", action="store_true", help="Center Crop Large Video to 1920x1080")
+        parser.add_argument("-r", "--roi", default="1280x720+20", help="Center ROI w/ vertical offset")
         parser.add_argument("-s", "--start", default="0", help="Start frame")
         parser.add_argument("-e", "--end", default="0", help="End/loop frame")
         parser.add_argument("-p", "--inpaint", default="left", choices=["left", "right", "mix", "telea", "navier", "none"], help="Inpaint algorithm")
@@ -119,10 +119,10 @@ class Main:
         print("Input:", self.input_path)
         print("Output:", self.output_path, "(disabled by -n)" if args.no_video else "")
 
+        self.crop_roi = self.parseRoi(args.roi)
         self.start_frame = self.parseFrameTimestamp(args.start)
         self.end_loop_frame = self.parseFrameTimestamp(args.end)
 
-        self.do_crop = args.crop
         self.write_json = not args.no_json
         self.write_video = not args.no_video
         self.overlay_in_video = args.overlay_video
@@ -133,6 +133,18 @@ class Main:
         }.get(args.display)
 
         return args
+
+    def parseRoi(self, roi_str):
+        """ROI str is WIDTHxHEIGHT+YOFFSET"""
+        pattern = r"(?P<w>\d+)x(?P<h>\d+)\+(?P<y>\d+)"
+        match = re.search(pattern, roi_str)
+        print(f"@@ ROI ARG: '{roi_str} --> match {match}")
+        assert match is not None, "Expected ROI syntax: WIDTHxHEIGHT+YOFFSET"
+        return {
+            "width":   int(match.group("w")),
+            "height":  int(match.group("h")),
+            "yoffset": int(match.group("y")),
+        }
 
     def parseFrameTimestamp(self, ts_str):
         if ts_str.isdigit():
@@ -203,12 +215,12 @@ class Main:
             print(f"@@ No next processor #{processor_idx}")
         return processor, processor_idx
 
-    def read_json(self, filename):
+    def read_json_file(self, filename):
         print(f"@@ Load JSON from {filename}")
         with open(filename, "r") as f:
             self.export_content = json.load(f)
 
-    def write_json(self, filename, content):
+    def write_json_file(self, filename, content):
         with open(filename, "w") as f:
             json.dump(content, f, indent=2)
         print(f"@@ Export JSON output to {filename}")
@@ -221,7 +233,7 @@ class Main:
         stats_iterations = 0
 
         if args.locator:
-            self.read_json(self.locator_path)
+            self.read_json_file(self.locator_path)
             if "pyrod" in self.export_content:
                 pyrod_data = self.export_content["pyrod"]
                 self.input_path = pyrod_data["input_path"]
@@ -230,13 +242,13 @@ class Main:
                 self.start_frame = min(max(start, self.start_frame), end)
                 self.end_loop_frame = self.end_loop_frame or end
                 self.end_loop_frame = max(start, min(self.end_loop_frame, end))
-                self.do_crop = not not pyrod_data["crop"]
-                print(f"Overriding input to file '{self.input_path}', frames {self.start_frame} to {self.end_loop_frame}, {'cropped' if self.do_crop else 'uncropped'}")
+                self.crop_roi = pyrod_data["crop_roi"]
+                print(f"Overriding input to file '{self.input_path}', frames {self.start_frame} to {self.end_loop_frame}, {'cropped' if self.crop_roi else 'uncropped'}")
 
         display_mode = self.display_mode
         if display_mode != DISPLAY_NONE:
             cv2.namedWindow(WINDOW_TITLE, cv2.WINDOW_NORMAL)
-            cv2.resizeWindow(WINDOW_TITLE, 1920//2, 1080//2)
+            cv2.resizeWindow(WINDOW_TITLE, 1280//2, 720//2)
             def _mouse_callback(event, x, y, flags, param):
                 if event == cv2.EVENT_MOUSEMOVE:
                     self.mx = x
@@ -266,16 +278,19 @@ class Main:
                 print(f"@@ End frame: {self.end_loop_frame} --> frame {self.end_loop_frame[0] * fps}")
                 self.end_loop_frame = int(self.end_loop_frame[0] * fps)
 
-            do_crop = self.do_crop
+
+            do_crop = False
             cropped_width = vid_width
             cropped_height = vid_height
-            if do_crop:
-                cropped_width = min(1920, vid_width)
-                cropped_height = min(1080, vid_height)
+            if vid_width > self.crop_roi["width"]:
+                do_crop = True
+                cropped_width = min(self.crop_roi["width"], vid_width)
+                cropped_height = min(self.crop_roi["height"], vid_height)
+                y_offset = self.crop_roi["yoffset"]
                 crop_x1 = (vid_width - cropped_width) // 2
-                crop_y1 = (vid_height - cropped_height) // 2
+                crop_y1 = (vid_height - cropped_height) // 2 + y_offset
                 crop_x2 = crop_x1 + cropped_width
-                crop_y2 = crop_y1 + cropped_height
+                crop_y2 = crop_y1 + cropped_height + y_offset
             width = cropped_width
             height = cropped_height
 
@@ -302,14 +317,14 @@ class Main:
             print(f"@@ Start with processor #{processor_idx}: {processor}")
 
             if self.write_video:
-                writer = cv2.VideoWriter(self.output_path, fourcc, fps, (width, height), isColor=True)
-                print(f"@@ Writing {width}x{height}@{fps} fps to", self.output_path)
+                writer = cv2.VideoWriter(self.output_path, fourcc, fps, (vid_width, vid_height), isColor=True)
+                print(f"@@ Writing {vid_width}x{vid_height}@{fps} fps to", self.output_path)
             if self.write_json:
                 self.export_content["pyrod"] = {
                     "input_path":   self.input_path,
                     "start_frame":  self.start_frame,
                     "end_frame":    self.end_loop_frame,
-                    "crop":         self.do_crop
+                    "crop_roi":     self.crop_roi,
                 }
 
             last_frame = None
@@ -355,6 +370,7 @@ class Main:
                         end_reached = True
                         continue
                     if do_crop:
+                        uncropped_frame = frame
                         frame = frame[crop_y1:crop_y2, crop_x1:crop_x2]
                     if do_downscale == 2:
                         frame = cv2.pyrDown(frame) # downscale by a fixed 2x factor
@@ -370,6 +386,8 @@ class Main:
 
                 if not self.paused:
                     processor.init_overlay(frame)
+                    if do_crop:
+                        cv2.rectangle(processor.overlay, (0, 0), (cropped_width - 1, cropped_height - 1), (0,0,0), 1)
                     result = processor.filter(frame_count, frame)
 
                     self.print_fps(loop_s, frame_count, processor.overlay)
@@ -397,6 +415,9 @@ class Main:
                         video_frame = original_frame
                     if do_downscale == 2:
                         video_frame = cv2.resize(video_frame, (0,0), fx=2, fy=2, interpolation=cv2.INTER_NEAREST)
+                    if do_crop:
+                        uncropped_frame[crop_y1:crop_y2, crop_x1:crop_x2] = video_frame
+                        video_frame = uncropped_frame
                     writer.write(video_frame)
 
                 if self.single_frame:
@@ -415,7 +436,7 @@ class Main:
             if writer is not None:
                 writer.release()
             if self.write_json and self.should_export:
-                self.write_json(self.export_path, self.export_content)
+                self.write_json_file(self.export_path, self.export_content)
             self.next_processor(processor, processor_idx)
             cap.release()
             if display_mode != DISPLAY_NONE:
