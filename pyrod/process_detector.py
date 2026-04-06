@@ -71,6 +71,11 @@ class Detector(ProcessorBase):
             color=(0, 255, 0),
             thickness=-1)
 
+    def smoothstep(self, x):
+        """x is expected in range 0..1 as float"""
+        # https://en.wikipedia.org/wiki/Smoothstep
+        return x * x * (3.0 - 2.0 * x)
+
     def find_rod_by_threshold(self, roi_lu, tracked_x, tracked_y):
         # Try a basic binary mask
         median_luminance = np.median(roi_lu)
@@ -131,9 +136,11 @@ class Detector(ProcessorBase):
         # overlay_view[mask >  128] = (0, 128, 255)
         # overlay_view[mask == 255] = (0,   0, 255)
         # Fill the overlay with (0, mask, 255)
-        overlay_view[:, :, 0] = 0
-        overlay_view[:, :, 1] = mask
-        overlay_view[:, :, 2] = 255
+        heatmap = overlay_view.copy()
+        heatmap[:, :, 0] = 0
+        heatmap[:, :, 1] = mask
+        heatmap[:, :, 2] = 255
+        overlay_view[mask > 0] = heatmap[mask > 0]
 
     def draw_mask_outline(self, mask_u8, roi_x_left):
         h, w = mask_u8.shape
@@ -361,9 +368,9 @@ class Detector(ProcessorBase):
         blur_mask_u8 = cv2.GaussianBlur(wide_mask_u8, self.rod_blur_ksize, 0)
 
         if self.view_mask and self.compute_overlay:
-            # self.draw_mask_heatmap(blur_mask_u8, 0)
-            self.draw_mask_outline(blur_mask_u8, 0)
-            self.draw_mask_line(blur_mask_u8, 0, -10)
+            self.draw_mask_heatmap(blur_mask_u8, 0)
+            # self.draw_mask_outline(blur_mask_u8, 0)
+            # self.draw_mask_line(blur_mask_u8, 0, -10)
 
         if self.inpaint_method:
             inpainted = self.inpaint_method(wide_roi_rgb, blur_mask_u8)
