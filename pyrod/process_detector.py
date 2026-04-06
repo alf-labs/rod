@@ -4,10 +4,9 @@ import scipy
 from processor import ProcessorBase
 from rod import Rod
 
-ROD_WIDTH = 35/1280
+ROD_WIDTH = 45/1280
 ROI_WIDTH = 4 * ROD_WIDTH
-ROI_HEIGHT = 5/12
-SKEW_PCT = 45/180
+ROI_HEIGHT = 400/720
 
 
 

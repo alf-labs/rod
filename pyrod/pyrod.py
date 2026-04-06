@@ -90,7 +90,7 @@ class Main:
         parser.add_argument("-l", "--locator", default="", help="Locator JSON data to read back")
         parser.add_argument("-0", "--locator-only", action="store_true", help="Only run locator process")
         parser.add_argument("-1", "--detector-preview", action="store_true", help="Run detector in preview (no inpaint)")
-        parser.add_argument("-r", "--roi", default="1280x720+20", help="Center ROI w/ vertical offset")
+        parser.add_argument("-r", "--roi", default="1280x720+180", help="Center ROI w/ vertical offset")
         parser.add_argument("-s", "--start", default="0", help="Start frame")
         parser.add_argument("-e", "--end", default="0", help="End/loop frame")
         parser.add_argument("-p", "--inpaint", default="left", choices=["left", "right", "mix", "telea", "navier", "none"], help="Inpaint algorithm")
@@ -138,7 +138,6 @@ class Main:
         """ROI str is WIDTHxHEIGHT+YOFFSET"""
         pattern = r"(?P<w>\d+)x(?P<h>\d+)\+(?P<y>\d+)"
         match = re.search(pattern, roi_str)
-        print(f"@@ ROI ARG: '{roi_str} --> match {match}")
         assert match is not None, "Expected ROI syntax: WIDTHxHEIGHT+YOFFSET"
         return {
             "width":   int(match.group("w")),
@@ -187,16 +186,16 @@ class Main:
             self.skip_num = 1 + self.skip_num % 4
         elif key == ord('1'):
             self.zoom = 1
-            cv2.resizeWindow(WINDOW_TITLE, width, height)
+            cv2.resizeWindow(WINDOW_TITLE, self.width, self.height)
         elif key == ord('2'):
             self.zoom = 2
-            cv2.resizeWindow(WINDOW_TITLE, width//2, height//2)
+            cv2.resizeWindow(WINDOW_TITLE, self.width//2, self.height//2)
         elif key == ord('3'):
             self.zoom = 3
-            cv2.resizeWindow(WINDOW_TITLE, width//3, height//3)
+            cv2.resizeWindow(WINDOW_TITLE, self.width//3, self.height//3)
         elif key == ord('4'):
             self.zoom = 4
-            cv2.resizeWindow(WINDOW_TITLE, width//4, height//4)
+            cv2.resizeWindow(WINDOW_TITLE, self.width//4, self.height//4)
 
     def next_processor(self, processor, processor_idx):
         if processor is not None:
@@ -290,9 +289,12 @@ class Main:
                 crop_x1 = (vid_width - cropped_width) // 2
                 crop_y1 = (vid_height - cropped_height) // 2 + y_offset
                 crop_x2 = crop_x1 + cropped_width
-                crop_y2 = crop_y1 + cropped_height + y_offset
+                crop_y2 = crop_y1 + cropped_height
+                print(f"@@ Crop bounds: {crop_x1}x{crop_y1} -> {crop_x2}x{crop_y2}")
             width = cropped_width
             height = cropped_height
+            self.width = width
+            self.height = height
 
             # Processor #0
             processor_idx = 0
