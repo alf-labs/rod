@@ -1,6 +1,7 @@
 import cv2
 import math
 import numpy as np
+import re
 import scipy
 from processor import ProcessorBase
 from rod import Rod
@@ -30,7 +31,6 @@ class LocatorBase(ProcessorBase):
         self.rod_width_px = int(ROD_WIDTH * width)
         self.rod_w_range_px = ( int(ROD_W_RANGE[0] * width), int(ROD_W_RANGE[1] * width) )
         print("Rod Width PX: ", self.rod_width_px, "in range", self.rod_w_range_px)
-
 
     def init_overlay(self, frame):
         super().init_overlay(frame)
@@ -125,7 +125,7 @@ class LocatorBase(ProcessorBase):
 
 
 class LocatorGen(LocatorBase):
-    def __init__(self):
+    def __init__(self, locator_rod_sz_str):
         super().__init__()
         self.last_cv_lu = None
         self.last_threshold = 0
@@ -139,6 +139,7 @@ class LocatorGen(LocatorBase):
             max_misses=TRACKER_MAX_MISS
         )
         self.frame_rods = []
+        self.parse_rod_size_str(locator_rod_sz_str)
 
     def init_size(self, width, height):
         if width > 1280 and width % 2 == 0 and height % 2 == 0:
@@ -157,14 +158,21 @@ class LocatorGen(LocatorBase):
         self.roi_q = int((width - self.roi_width_px) // 2)
         print("ROI Width PX: ", self.roi_width_px, "px with side bands", self.roi_q, "px")
 
+    def parse_rod_size_str(self, locator_rod_sz_str):
+        pattern = r"(?P<norm>\d+),(?P<min>\d+),(?P<max>\d+),/(?P<width>\d+)"
+        match = re.search(pattern, locator_rod_sz_str)
+        assert match is not None, "Expected syntax: 'normal,min,max/width', e.g. '50,30,75,/1280'"
+        _norm = int(match.group("norm"))
+        _min = int(match.group("min"))
+        _max = int(match.group("max"))
+        _width = int(match.group("width"))
+        global ROD_WIDTH, ROD_W_RANGE
+        ROD_WIDTH = _norm / _width
+        ROD_W_RANGE = (_min / _width, _max / _width)
+        print(f"@@ Rod Size args: {ROD_WIDTH} within {ROD_W_RANGE}")
+
     def weight(self, a, b, weight_a=0.75):
         return a * weight_a + b * (1 - weight_a)
-
-    def weight_asymetric(self, a, b, weight_a_up=0.25, weight_a_down=0.75):
-        if b > a:   # going up
-            return a * weight_a_up + b * (1 - weight_a_up)
-        else:
-            return a * weight_a_down + b * (1 - weight_a_down)
 
     def y_np_scalar(self, np_scalar, top=0):
         if top > 0:

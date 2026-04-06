@@ -79,7 +79,7 @@ class Main:
         if self.display_mode != DISPLAY_WITH_OVERLAY and frame_count % 100 == 0:
             print(text)
 
-    def parseArgs(self):
+    def parse_args(self):
         parser = argparse.ArgumentParser(description="PyRod")
         parser.add_argument("-d", "--display", default="full", choices=["none", "prod", "full"], help="Window Display")
         parser.add_argument("-i", "--input", default="", help="Input video")
@@ -89,6 +89,7 @@ class Main:
         parser.add_argument(      "--no-json", action="store_true", help="Skip JSON Export")
         parser.add_argument("-l", "--locator", default="", help="Locator JSON data to read back")
         parser.add_argument("-0", "--locator-only", action="store_true", help="Only run locator process")
+        parser.add_argument(      "--locator-rod-sz", default="50,30,75,/1280", help="Locator Rod size/min/max")
         parser.add_argument("-1", "--detector-preview", action="store_true", help="Run detector in preview (no inpaint)")
         parser.add_argument("-r", "--roi", default="1280x720+180", help="Center ROI w/ vertical offset")
         parser.add_argument("-s", "--start", default="0", help="Start frame")
@@ -119,9 +120,9 @@ class Main:
         print("Input:", self.input_path)
         print("Output:", self.output_path, "(disabled by -n)" if args.no_video else "")
 
-        self.crop_roi = self.parseRoi(args.roi)
-        self.start_frame = self.parseFrameTimestamp(args.start)
-        self.end_loop_frame = self.parseFrameTimestamp(args.end)
+        self.crop_roi = self.parse_roi(args.roi)
+        self.start_frame = self.parse_frame_timestamp(args.start)
+        self.end_loop_frame = self.parse_frame_timestamp(args.end)
 
         self.write_json = not args.no_json
         self.write_video = not args.no_video
@@ -134,7 +135,7 @@ class Main:
 
         return args
 
-    def parseRoi(self, roi_str):
+    def parse_roi(self, roi_str):
         """ROI str is WIDTHxHEIGHT+YOFFSET"""
         pattern = r"(?P<w>\d+)x(?P<h>\d+)\+(?P<y>\d+)"
         match = re.search(pattern, roi_str)
@@ -145,7 +146,7 @@ class Main:
             "yoffset": int(match.group("y")),
         }
 
-    def parseFrameTimestamp(self, ts_str):
+    def parse_frame_timestamp(self, ts_str):
         if ts_str.isdigit():
             # Just a number: this represents a frame number
             return int(ts_str)
@@ -165,7 +166,7 @@ class Main:
             s = match.group("s") or 0
             return ( int(h) * 3600 + int(m) * 60 + int(s), "seconds" )
 
-    def parseKeys(self, processor, wait_ms=1):
+    def parse_keys(self, processor, wait_ms=1):
         if self.paused:
             wait_ms = 300
         key = cv2.waitKey(wait_ms) & 0xFF
@@ -226,7 +227,7 @@ class Main:
 
     def run(self):
         print("@@ Run")
-        args = self.parseArgs()
+        args = self.parse_args()
 
         stats_start_main_s = time.perf_counter()
         stats_iterations = 0
@@ -303,7 +304,7 @@ class Main:
                 self.processors.append( loc_reader )
                 loc_reader.read_json(self.export_content["locator"])
             else:
-                self.processors.append( LocatorGen() )
+                self.processors.append( LocatorGen(args.locator_rod_sz) )
             processor = self.processors[0]
             if not args.locator_only:
                 # Processor #1
@@ -337,7 +338,7 @@ class Main:
             cap.set(cv2.CAP_PROP_POS_FRAMES, self.start_frame)
             while cap.isOpened() and not self.quit_requested:
                 stats_iterations += 1
-                self.parseKeys(processor)
+                self.parse_keys(processor)
                 start_loop_s = time.perf_counter()
                 if self.paused:
                     frame = last_frame.copy()

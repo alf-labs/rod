@@ -171,8 +171,6 @@ class Detector(ProcessorBase):
             lx = x
             ly = curr
 
-
-
     def inpaint_telea(self, wide_roi_rgb, blur_mask_u8):
         return cv2.inpaint(wide_roi_rgb, blur_mask_u8, inpaintRadius=5, flags=cv2.INPAINT_TELEA)
 
