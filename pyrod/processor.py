@@ -22,15 +22,16 @@ class ProcessorBase:
         else:
             self.overlay[:] = (0, 0, 0)
 
-    def combine_overlay(self, src_dst):
+    def combine_overlay(self, src):
         # This is a simplification of the RGB overlay blending where we
         # treat the source overlay as a binary threshold ... anything that is
         # not zero is copied over, without blending. It's less pretty as it
         # destroys text's and rod's alpha, but it's at least 2x faster.
         overlay = self.overlay
         mask = (overlay[..., 0] | overlay[..., 1] | overlay[..., 2]) > 0
-        src_dst[mask] = overlay[mask]
-        return src_dst
+        dest = src.copy()
+        dest[mask] = overlay[mask]
+        return dest
 
     def combine_overlay_unused(self, src_dst):
         # This is a "correct" RGB overlay blending on the RGB destination image.
