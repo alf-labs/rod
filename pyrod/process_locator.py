@@ -74,6 +74,46 @@ class LocatorBase(ProcessorBase):
         color = (0, 255, 0) if new_rod else (0, 0, 255)
         cv2.rectangle(self.overlay, (left_px, y1), (right_px, y2), color, 4)
 
+    def fix_sudden_short_movements(self):
+        nf = len(self.frame_rods)
+        lc = self.frame_rods[0].center()
+        for i1 in range(0, nf):
+            f1 = self.frame_rods[i1]
+            c1 = f1.center()
+            d1 = c1 - lc
+            if abs(d1) > 2 * self.rod_width_px:
+                # We have a variation in rod position that is significant.
+                # If we can find a signification variation in the opposite directiom
+                # within 1 second of frames, we cancel the variation using interpolation.
+                s2 = -1 * np.sign(d1)
+                l2 = c1
+                for i2 in range(i1 + 1, min(i1 + 30, nf)):
+                    f2 = self.frame_rods[i2]
+                    c2 = f2.center()
+                    d2 = c2 - l2
+                    l2 = c2
+                    if abs(d2) > 2* self.rod_width_px and np.sign(d2) == s2:
+                        # This is the significant variation in the opposite direction.
+                        # 'lc' is the starting center we want to keep (not 'c1')
+                        # and 'c2' is the end center we want to keep.
+                        # All rods centers from i1 (included) up to i2-1 need to be changed.
+                        print(f"Fix center for frames {i1}...{i2-1}")
+                        dc = c2 - lc
+                        ni = i2 - i1
+                        si = i1
+                        for i in range(0, ni):
+                            c = lc + dc * float(i) / ni
+                            self.frame_rods[i1 + i].recenter(c)
+            # print(f"@@ [{i1:05d}] --> {c1:5.2f} /\ {d1:5.2f} { '*' * (round(math.log(abs(d1) + 1e-6)))}")
+            lc = c1
+
+        c = np.array([fr.center() for fr in self.frame_rods])
+        dc = np.diff(c)
+        print(f"@@ dc min {np.min(dc)},  mean {np.mean(dc)},  median {np.median(dc)},  max {np.max(dc)},")
+        counts, bin_edges = np.histogram(dc, bins=10)
+        print(f"@@ dc counts {counts}")
+        print(f"@@ bin_edges {bin_edges}")
+
     def filter(self, frame_index, frame):
         return super().filter(frame_index, frame)
 
@@ -393,11 +433,13 @@ class LocatorGen(LocatorBase):
             rod.apply_scale(self.downscale)
 
     def export(self):
-        print(f"@@ Locator export")
+        print(f"@@ LocatorGen export")
         content = [ rod.toJson() for rod in self.frame_rods ]
         return { "locator": content }
 
     def release(self):
+        print(f"@@ LocatorGen release")
+        self.fix_sudden_short_movements()
         super().release()
 
 
@@ -429,47 +471,6 @@ class LocatorRdr(LocatorBase):
     def pre_release(self):
         print(f"@@ LocatorRdr pre-release")
         self.fix_sudden_short_movements()
-
-    def fix_sudden_short_movements(self):
-        nf = len(self.frame_rods)
-        lc = self.frame_rods[0].center()
-        for i1 in range(0, nf):
-            f1 = self.frame_rods[i1]
-            c1 = f1.center()
-            d1 = c1 - lc
-            if abs(d1) > 2 * self.rod_width_px:
-                # We have a variation in rod position that is significant.
-                # If we can find a signification variation in the opposite directiom
-                # within 1 second of frames, we cancel the variation using interpolation.
-                s2 = -1 * np.sign(d1)
-                l2 = c1
-                for i2 in range(i1 + 1, i1 + 30):
-                    f2 = self.frame_rods[i2]
-                    c2 = f2.center()
-                    d2 = c2 - l2
-                    l2 = c2
-                    if abs(d2) > 2* self.rod_width_px and np.sign(d2) == s2:
-                        # This is the significant variation in the opposite direction.
-                        # 'lc' is the starting center we want to keep (not 'c1')
-                        # and 'c2' is the end center we want to keep.
-                        # All rods centers from i1 (included) up to i2-1 need to be changed.
-                        print(f"Fix center for frames {i1}...{i2-1}")
-                        dc = c2 - lc
-                        ni = i2 - i1
-                        si = i1
-                        for i in range(0, ni):
-                            c = lc + dc * float(i) / ni
-                            self.frame_rods[i1 + i].recenter(c)
-            # print(f"@@ [{i1:05d}] --> {c1:5.2f} /\ {d1:5.2f} { '*' * (round(math.log(abs(d1) + 1e-6)))}")
-            lc = c1
-
-        c = np.array([fr.center() for fr in self.frame_rods])
-        dc = np.diff(c)
-        print(f"@@ dc min {np.min(dc)},  mean {np.mean(dc)},  median {np.median(dc)},  max {np.max(dc)},")
-        counts, bin_edges = np.histogram(dc, bins=10)
-        print(f"@@ dc counts {counts}")
-        print(f"@@ bin_edges {bin_edges}")
-
 
     def export(self):
         return super().export()
