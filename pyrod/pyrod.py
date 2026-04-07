@@ -278,7 +278,6 @@ class Main:
                 print(f"@@ End frame: {self.end_frame} --> frame {self.end_frame[0] * fps}")
                 self.end_frame = int(self.end_frame[0] * fps)
 
-
             do_crop = False
             cropped_width = vid_width
             cropped_height = vid_height
@@ -301,6 +300,7 @@ class Main:
             processor_idx = 0
             if args.locator:
                 loc_reader = LocatorRdr(
+                    locator_rod_sz_str=args.locator_rod_sz,
                     start_frame=self.start_frame,
                 )
                 self.processors.append( loc_reader )

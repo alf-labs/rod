@@ -19,12 +19,26 @@ TRACKER_MIN_HITS=7
 TRACKER_MAX_MISS=3
 
 class LocatorBase(ProcessorBase):
-    def __init__(self, start_frame):
+    def __init__(self, locator_rod_sz_str, start_frame):
         super().__init__()
         self.start_frame = start_frame
         self.frame_rods = []
         self.frame_tunnel_metric = {}
         self.downscale = 1  # can be either 1 or 2
+        self.parse_rod_size_str(locator_rod_sz_str)
+
+    def parse_rod_size_str(self, locator_rod_sz_str):
+        pattern = r"(?P<norm>\d+),(?P<min>\d+),(?P<max>\d+),/(?P<width>\d+)"
+        match = re.search(pattern, locator_rod_sz_str)
+        assert match is not None, "Expected syntax: 'normal,min,max/width', e.g. '50,30,75,/1280'"
+        _norm = int(match.group("norm"))
+        _min = int(match.group("min"))
+        _max = int(match.group("max"))
+        _width = int(match.group("width"))
+        global ROD_WIDTH, ROD_W_RANGE
+        ROD_WIDTH = _norm / _width
+        ROD_W_RANGE = (_min / _width, _max / _width)
+        print(f"@@ Rod Size args: {ROD_WIDTH} within {ROD_W_RANGE}")
 
     def init_size(self, width, height):
         super().init_size(width, height)
@@ -35,6 +49,13 @@ class LocatorBase(ProcessorBase):
 
     def init_overlay(self, frame):
         super().init_overlay(frame)
+
+    def rod_at(self, frame_index):
+        idx = frame_index - self.start_frame
+        if idx >= 0 and idx < len(self.frame_rods):
+            return self.frame_rods[idx]
+        else:
+            return None
 
     def append_frame_rod(self, new_rod):
         if self.frame_rods:
@@ -138,7 +159,7 @@ class LocatorBase(ProcessorBase):
 
 class LocatorGen(LocatorBase):
     def __init__(self, locator_rod_sz_str, start_frame):
-        super().__init__(start_frame)
+        super().__init__(locator_rod_sz_str, start_frame)
         self.last_cv_lu = None
         self.last_threshold = 0
         self.current_rod = None
@@ -150,8 +171,6 @@ class LocatorGen(LocatorBase):
             min_hits=TRACKER_MIN_HITS,
             max_misses=TRACKER_MAX_MISS
         )
-        self.frame_rods = []
-        self.parse_rod_size_str(locator_rod_sz_str)
 
     def init_size(self, width, height):
         if width > 1280 and width % 2 == 0 and height % 2 == 0:
@@ -169,19 +188,6 @@ class LocatorGen(LocatorBase):
         self.roi_width_px = int(ROI_WIDTH_PCT * width)
         self.roi_q = int((width - self.roi_width_px) // 2)
         print("ROI Width PX: ", self.roi_width_px, "px with side bands", self.roi_q, "px")
-
-    def parse_rod_size_str(self, locator_rod_sz_str):
-        pattern = r"(?P<norm>\d+),(?P<min>\d+),(?P<max>\d+),/(?P<width>\d+)"
-        match = re.search(pattern, locator_rod_sz_str)
-        assert match is not None, "Expected syntax: 'normal,min,max/width', e.g. '50,30,75,/1280'"
-        _norm = int(match.group("norm"))
-        _min = int(match.group("min"))
-        _max = int(match.group("max"))
-        _width = int(match.group("width"))
-        global ROD_WIDTH, ROD_W_RANGE
-        ROD_WIDTH = _norm / _width
-        ROD_W_RANGE = (_min / _width, _max / _width)
-        print(f"@@ Rod Size args: {ROD_WIDTH} within {ROD_W_RANGE}")
 
     def weight(self, a, b, weight_a=0.75):
         return a * weight_a + b * (1 - weight_a)
@@ -471,8 +477,8 @@ class LocatorGen(LocatorBase):
 
 
 class LocatorRdr(LocatorBase):
-    def __init__(self, start_frame):
-        super().__init__(start_frame)
+    def __init__(self, locator_rod_sz_str, start_frame):
+        super().__init__(locator_rod_sz_str, start_frame)
 
     def init_size(self, width, height):
         super().init_size(width, height)

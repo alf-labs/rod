@@ -4,16 +4,14 @@ import scipy
 from processor import ProcessorBase
 from rod import Rod
 
-ROD_WIDTH = 45/1280
-ROI_WIDTH = 4 * ROD_WIDTH
+ROI_WIDTH_MULTIPLIER = 4 # x rod_width_px
 ROI_HEIGHT = 400/720
-
 
 
 class Detector(ProcessorBase):
     def __init__(self, locator, inpainting="left", rod_dilate_px=31, rod_blur_px=31):
         super().__init__()
-        self.frame_rods = locator.frame_rods
+        self.locator = locator
         self.clahe = cv2.createCLAHE(clipLimit=1.5, tileGridSize=(8, 8))
         self.history_mask = None
         self.view_mask = inpainting is None
@@ -31,10 +29,10 @@ class Detector(ProcessorBase):
     def init_size(self, width, height):
         super().init_size(width, height)
         print(f"@@ Detector init_size")
-        self.rod_width_px = int(ROD_WIDTH * width)
-        self.roi_width = int(ROI_WIDTH * width)
+        self.rod_width_px = self.locator.rod_width_px
+        self.roi_width = int(ROI_WIDTH_MULTIPLIER * self.rod_width_px)
         self.roi_height = int(ROI_HEIGHT * height)
-        print(f"ROI Detector: {self.roi_width}x{self.roi_height}")
+        print(f"Detector: Rod {self.rod_width_px} px --> ROI {self.roi_width}x{self.roi_height}")
 
     def init_overlay(self, frame):
         super().init_overlay(frame)
@@ -315,9 +313,8 @@ class Detector(ProcessorBase):
         return composite.astype(np.uint8)
 
     def filter(self, frame_index, frame):
-        if frame_index >= 0 and frame_index < len(self.frame_rods):
-            rod = self.frame_rods[frame_index]
-        else:
+        rod = self.locator.rod_at(frame_index)
+        if not rod:
             print(f"@@ Detector: No rod info at frame {frame_index}")
             return frame
 
