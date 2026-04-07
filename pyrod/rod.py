@@ -1,11 +1,12 @@
 
 class Rod:
-    def __init__(self, left, right, score, frame=0, tunnel_metric=1.0):
+    def __init__(self, left, right, score, frame=0, tunnel_metric=1.0, missing=False):
         self.left = left
         self.right = right
         self.score = score
         self.frame = frame
         self.tunnel_metric = tunnel_metric
+        self.missing = missing
 
     def merge(self, other_rod, weight=0.75):
         wa = weight
@@ -15,6 +16,7 @@ class Rod:
         self.score = other_rod.score
         self.frame = other_rod.frame
         self.tunnel_metric = other_rod.tunnel_metric
+        self.missing = self.missing and other_rod.missing
 
     def apply_scale(self, scale):
         if scale != 1:
@@ -46,17 +48,17 @@ class Rod:
     def isTunnel(self):
         return self.tunnel_metric < 1.0
 
-    def dupAtFrame(self, frame, tunnel_metric=None):
+    def dupAtFrame(self, frame, tunnel_metric=None, missing=False):
         if tunnel_metric is None:
             tunnel_metric = self.tunnel_metric
-        return Rod(self.left, self.right, self.score, frame, tunnel_metric)
+        return Rod(self.left, self.right, self.score, frame, tunnel_metric, missing)
 
-    def dupInterpolateTo(self, frame, toRod, tunnel_metric=None):
+    def dupInterpolateTo(self, frame, toRod, tunnel_metric=None, missing=False):
         if tunnel_metric is None:
             tunnel_metric = self.tunnel_metric
         delta_f = toRod.frame - self.frame
         if delta_f == 0:    # should not happen
-            return self.dupAtFrame(frame)
+            return self.dupAtFrame(frame, missing=missing)
         pb = (frame - self.frame) / delta_f
         pa = 1 - pb
         return Rod(
@@ -64,16 +66,20 @@ class Rod:
             self.right * pa + toRod.right * pb,
             round(self.score * pa + toRod.score * pb, 2),
             frame,
-            tunnel_metric)
+            tunnel_metric,
+            missing)
 
     def toJson(self):
-        return {
+        data = {
             "l": self.left,
             "r": self.right,
             "s": self.score,
             "f": self.frame,
             "t": self.tunnel_metric,
         }
+        if self.missing:
+            data["m"] = True
+        return data
 
     @staticmethod
     def fromJson(params):
@@ -89,10 +95,15 @@ class Rod:
             if not isinstance(params[key], (int, float)):
                 raise ValueError(f"[Rod.fromJson] params['{key}'] must be int or float")
 
-        return Rod(
+        rod = Rod(
             params["l"],
             params["r"],
             params["s"],
             params["f"],
             params["t"],
         )
+
+        if "m" in params and params["m"]:
+            rod.missing = True
+
+        return rod

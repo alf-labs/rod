@@ -19,8 +19,9 @@ TRACKER_MIN_HITS=7
 TRACKER_MAX_MISS=3
 
 class LocatorBase(ProcessorBase):
-    def __init__(self):
+    def __init__(self, start_frame):
         super().__init__()
+        self.start_frame = start_frame
         self.frame_rods = []
         self.frame_tunnel_metric = {}
         self.downscale = 1  # can be either 1 or 2
@@ -36,25 +37,27 @@ class LocatorBase(ProcessorBase):
         super().init_overlay(frame)
 
     def append_frame_rod(self, new_rod):
-        last_rod = None
-        last_idx = 0
         if self.frame_rods:
             last_rod = self.frame_rods[-1]
             last_idx = last_rod.frame
+        else:
+            last_rod = None
+            last_idx = self.start_frame - 1
         new_idx = new_rod.frame
 
         if new_idx > last_idx + 1:
             if last_rod is None:
                 # Gap before the first rod. We just fill as-is.
                 for idx in range(last_idx + 1, new_idx):
-                    rod = new_rod.dupAtFrame(idx)
+                    rod = new_rod.dupAtFrame(idx, missing=True)
                     if idx in self.frame_tunnel_metric:
                         rod.tunnel_metric = self.frame_tunnel_metric[idx]
                     self.frame_rods.append(rod)
             else:
-                # Otherwise we have a frame gap, which we want to close by interpolation.
+                # Otherwise we have a frame gap, which we want to close by interpolation *later*.
+                # For now just use the earlier values, and we'll interpolate in a 2nd pass.
                 for idx in range(last_idx + 1, new_idx):
-                    rod = last_rod.dupInterpolateTo(idx, new_rod)
+                    rod = last_rod.dupAtFrame(idx, missing=True)
                     if idx in self.frame_tunnel_metric:
                         rod.tunnel_metric = self.frame_tunnel_metric[idx]
                     self.frame_rods.append(rod)
@@ -134,8 +137,8 @@ class LocatorBase(ProcessorBase):
 
 
 class LocatorGen(LocatorBase):
-    def __init__(self, locator_rod_sz_str):
-        super().__init__()
+    def __init__(self, locator_rod_sz_str, start_frame):
+        super().__init__(start_frame)
         self.last_cv_lu = None
         self.last_threshold = 0
         self.current_rod = None
@@ -468,8 +471,8 @@ class LocatorGen(LocatorBase):
 
 
 class LocatorRdr(LocatorBase):
-    def __init__(self):
-        super().__init__()
+    def __init__(self, start_frame):
+        super().__init__(start_frame)
 
     def init_size(self, width, height):
         super().init_size(width, height)
@@ -486,7 +489,7 @@ class LocatorRdr(LocatorBase):
         self.next_processor_requested = True
 
     def filter(self, frame_index, frame):
-        if frame_index >= 0 and frame_index < len(self.frame_rods):
+        if frame_index >= start_frame and frame_index < len(self.frame_rods):
             rod = self.frame_rods[frame_index]
             if self.compute_overlay:
                 self.draw_rod(rod)

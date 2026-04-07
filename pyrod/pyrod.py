@@ -56,7 +56,7 @@ class Main:
         self.display_mode = DISPLAY_WITH_OVERLAY
         self.quit_requested = False
         self.start_frame = 0
-        self.end_loop_frame = 0
+        self.end_frame = 0
         self.processors = []
         self.export_content = {}
         self.should_export = False
@@ -122,7 +122,7 @@ class Main:
 
         self.crop_roi = self.parse_roi(args.roi)
         self.start_frame = self.parse_frame_timestamp(args.start)
-        self.end_loop_frame = self.parse_frame_timestamp(args.end)
+        self.end_frame = self.parse_frame_timestamp(args.end)
 
         self.write_json = not args.no_json
         self.write_video = not args.no_video
@@ -240,10 +240,10 @@ class Main:
                 start = pyrod_data["start_frame"]
                 end = pyrod_data["end_frame"]
                 self.start_frame = min(max(start, self.start_frame), end)
-                self.end_loop_frame = self.end_loop_frame or end
-                self.end_loop_frame = max(start, min(self.end_loop_frame, end))
+                self.end_frame = self.end_frame or end
+                self.end_frame = max(start, min(self.end_frame, end))
                 self.crop_roi = pyrod_data["crop_roi"]
-                print(f"Overriding input to file '{self.input_path}', frames {self.start_frame} to {self.end_loop_frame}, {'cropped' if self.crop_roi else 'uncropped'}")
+                print(f"Overriding input to file '{self.input_path}', frames {self.start_frame} to {self.end_frame}, {'cropped' if self.crop_roi else 'uncropped'}")
 
         display_mode = self.display_mode
         if display_mode != DISPLAY_NONE:
@@ -274,9 +274,9 @@ class Main:
             if isinstance(self.start_frame, tuple):
                 print(f"@@ Start frame: {self.start_frame} --> frame {self.start_frame[0] * fps}")
                 self.start_frame = int(self.start_frame[0] * fps)
-            if isinstance(self.end_loop_frame, tuple):
-                print(f"@@ End frame: {self.end_loop_frame} --> frame {self.end_loop_frame[0] * fps}")
-                self.end_loop_frame = int(self.end_loop_frame[0] * fps)
+            if isinstance(self.end_frame, tuple):
+                print(f"@@ End frame: {self.end_frame} --> frame {self.end_frame[0] * fps}")
+                self.end_frame = int(self.end_frame[0] * fps)
 
 
             do_crop = False
@@ -300,11 +300,16 @@ class Main:
             # Processor #0
             processor_idx = 0
             if args.locator:
-                loc_reader = LocatorRdr()
+                loc_reader = LocatorRdr(
+                    start_frame=self.start_frame,
+                )
                 self.processors.append( loc_reader )
                 loc_reader.read_json(self.export_content["locator"])
             else:
-                self.processors.append( LocatorGen(args.locator_rod_sz) )
+                self.processors.append( LocatorGen(
+                    locator_rod_sz_str=args.locator_rod_sz,
+                    start_frame=self.start_frame,
+                    ) )
             processor = self.processors[0]
             if not args.locator_only:
                 # Processor #1
@@ -326,7 +331,7 @@ class Main:
                 self.export_content["pyrod"] = {
                     "input_path":   self.input_path,
                     "start_frame":  self.start_frame,
-                    "end_frame":    self.end_loop_frame,
+                    "end_frame":    self.end_frame,
                     "crop_roi":     self.crop_roi,
                 }
 
@@ -378,7 +383,7 @@ class Main:
                     if do_downscale == 2:
                         frame = cv2.pyrDown(frame) # downscale by a fixed 2x factor
                     frame_count += 1
-                    if self.end_loop_frame > 0 and self.end_loop_frame == frame_count:
+                    if self.end_frame > 0 and self.end_frame == frame_count:
                         end_reached = True
                     last_frame = frame.copy()
 
