@@ -211,7 +211,7 @@ class Detector(ProcessorBase):
             # A mirror on L2: (x) -> 2*L2-x
             # Source: L2 -> (plateau) 2*L2-R2 --> (gradient) -> 2*L2 - R0, step -1.
 
-            # # Version A: copy L2-R2 mirrored as-is, no blur (same as right).q
+            # # Version A: copy L2-R2 mirrored as-is, no blur (same as right).
             # src_row = rgb_row[left2 : left2 - w2 : -1, :]
             # Version A: rgb_row[left2:right2] = src_row[:]
 

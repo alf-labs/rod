@@ -77,22 +77,25 @@ class LocatorBase(ProcessorBase):
     def fix_sudden_short_movements(self):
         nf = len(self.frame_rods)
         lc = self.frame_rods[0].center()
+        DX = 2 * self.rod_width_px
+        NB_FRAMES = 30
+        print(f"Detect center change for {DX} delta, {NB_FRAMES} frames max")
         for i1 in range(0, nf):
             f1 = self.frame_rods[i1]
             c1 = f1.center()
             d1 = c1 - lc
-            if abs(d1) > 2 * self.rod_width_px:
+            if abs(d1) > DX:
                 # We have a variation in rod position that is significant.
                 # If we can find a signification variation in the opposite directiom
                 # within 1 second of frames, we cancel the variation using interpolation.
                 s2 = -1 * np.sign(d1)
                 l2 = c1
-                for i2 in range(i1 + 1, min(i1 + 30, nf)):
+                for i2 in range(i1 + 1, min(i1 + NB_FRAMES, nf)):
                     f2 = self.frame_rods[i2]
                     c2 = f2.center()
                     d2 = c2 - l2
                     l2 = c2
-                    if abs(d2) > 2* self.rod_width_px and np.sign(d2) == s2:
+                    if abs(d2) > DX and np.sign(d2) == s2:
                         # This is the significant variation in the opposite direction.
                         # 'lc' is the starting center we want to keep (not 'c1')
                         # and 'c2' is the end center we want to keep.
@@ -104,7 +107,13 @@ class LocatorBase(ProcessorBase):
                         for i in range(0, ni):
                             c = lc + dc * float(i) / ni
                             self.frame_rods[i1 + i].recenter(c)
-            # print(f"@@ [{i1:05d}] --> {c1:5.2f} /\ {d1:5.2f} { '*' * (round(math.log(abs(d1) + 1e-6)))}")
+            if False: # DEBUG
+                c1b = f1.center()
+                d1b = c1b - lc
+                if c1b == c1:
+                    print(f"@@ [{i1:05d}] --> {c1:5.2f} /\ {d1:5.2f} { '*' * (round(math.log(abs(d1) + 1e-6)))}")
+                else:
+                    print(f"@@ [{i1:05d}] --> {c1:5.2f} /\ {d1:5.2f} ==> {c1b:5.2f} /\ {d1b:5.2f} { '*' * (round(math.log(abs(d1) + 1e-6)))}")
             lc = c1
 
         c = np.array([fr.center() for fr in self.frame_rods])
@@ -443,7 +452,14 @@ class LocatorGen(LocatorBase):
     def export(self):
         print(f"@@ LocatorGen export")
         content = [ rod.toJson() for rod in self.frame_rods ]
-        return { "locator": content }
+        return {
+            "locator": content,
+            "locator_rod_px": {
+                "rod_width_px": self.rod_width_px,
+                "rod_min_px":   self.rod_w_range_px[0],
+                "rod_max_px":   self.rod_w_range_px[1],
+            }
+        }
 
     def release(self):
         print(f"@@ LocatorGen release")
