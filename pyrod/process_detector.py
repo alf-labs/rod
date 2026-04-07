@@ -6,7 +6,7 @@ from rod import Rod
 
 ROI_WIDTH_MULTIPLIER = 4 # x rod_width_px
 ROI_HEIGHT = 400/720
-
+ROD_BLUR_PY = 15/720
 
 class Detector(ProcessorBase):
     def __init__(self, locator, inpainting="left", rod_dilate_px=31, rod_blur_px=31):
@@ -25,6 +25,7 @@ class Detector(ProcessorBase):
         }.get(inpainting, None)
         self.rod_dilate_kernel = np.ones((3, rod_dilate_px), np.uint8)
         self.rod_blur_ksize = (rod_blur_px, 3)
+        self.rod_h_top = None
 
     def init_size(self, width, height):
         super().init_size(width, height)
@@ -32,6 +33,7 @@ class Detector(ProcessorBase):
         self.rod_width_px = self.locator.rod_width_px
         self.roi_width = int(ROI_WIDTH_MULTIPLIER * self.rod_width_px)
         self.roi_height = int(ROI_HEIGHT * height)
+        self.rod_blur_py = int(ROD_BLUR_PY * height)
         print(f"Detector: Rod {self.rod_width_px} px --> ROI {self.roi_width}x{self.roi_height}")
 
     def init_overlay(self, frame):
@@ -69,10 +71,18 @@ class Detector(ProcessorBase):
             color=(0, 255, 0),
             thickness=-1)
 
+    def weight(self, a, b, weight_a=0.75):
+        return a * weight_a + b * (1 - weight_a)
+
     def smoothstep(self, x):
         """x is expected in range 0..1 as float"""
         # https://en.wikipedia.org/wiki/Smoothstep
-        return x * x * (3.0 - 2.0 * x)
+        if x < 0:
+            return 0
+        elif x >= 1:
+            return 1
+        else:
+            return x * x * (3.0 - 2.0 * x)
 
     def find_rod_by_threshold(self, roi_lu, tracked_x, tracked_y):
         # Try a basic binary mask
@@ -185,8 +195,21 @@ class Detector(ProcessorBase):
     def inpaint_noop(self, wide_roi_rgb, blur_mask_u8):
         return wide_roi_rgb
 
+    def update_rod_h_top(self, y):
+        if self.rod_h_top is None:
+            self.rod_h_top = int(y)
+        else:
+            self.rod_h_top = int(self.weight(self.rod_h_top, y, 0.1))
+
     def inpaint_manual_left(self, wide_roi_rgb, blur_mask_u8, mask_transform=None):
         h, w, _ = wide_roi_rgb.shape
+
+        if self.rod_h_top is None:
+            y_blur_0 = 0
+            y_blur_1 = 0
+        else:
+            y_blur_1 = self.rod_h_top
+            y_blur_0 = y_blur_1 + self.rod_blur_py
 
         for y in range(h-1, 0, -1):
             blur_row = blur_mask_u8[y, :]
@@ -194,6 +217,8 @@ class Detector(ProcessorBase):
 
             index255 = np.where(blur_row == 255)[0]
             if len(index255) == 0:
+                self.update_rod_h_top(y)
+                print(f"@@ h {h}, y {y}, rod_h_top = {self.rod_h_top}, y_blur_0 {y_blur_0} --> y_blur_1 {y_blur_1}")
                 break  # no more rod
             left2 = index255[0]
             right2 = index255[-1]
@@ -203,6 +228,12 @@ class Detector(ProcessorBase):
             left0 = np.argmax(blur_row[:left2] > threshold)
             right0 = right2 + np.argmax(blur_row[right2:] <= threshold)
             w0 = right0 - left0
+
+            line_blend = 1
+            if y < y_blur_0:
+                dy = y_blur_0 - y
+                line_blend = 1 - self.smoothstep(dy / (y_blur_0 - y_blur_1))
+            line_blend = int(256 * line_blend)
 
             # "left" means we just mirror columns on the left (L2) part of the rod.
             # Destination: L2 -> (plateau) R2 (a W2 width) --> (gradient) R0
@@ -225,9 +256,10 @@ class Detector(ProcessorBase):
             src_row_u16 = src_row.astype(np.uint16)
             dst_row_u16 = rgb_row[left2 : right0].astype(np.uint16)
             # print(f"@@ mask_u8.shape={mask_u8.shape}, src_row_u16.shape={src_row_u16.shape}, dst_row_u16.shape={dst_row_u16.shape}")
+            line_mask_u16 = (mask_u8.astype(np.uint16) * line_blend) // 256
             blended = (
-                    dst_row_u16 * (255 - mask_u8)
-                    + src_row_u16 * mask_u8
+                    dst_row_u16 * (255 - line_mask_u16)
+                    + src_row_u16 * line_mask_u16
                 ) // 255
             rgb_row[left2 : right0] = blended.astype(np.uint8)
 
@@ -242,6 +274,7 @@ class Detector(ProcessorBase):
 
             index255 = np.where(blur_row == 255)[0]
             if len(index255) == 0:
+                self.update_rod_h_top(y)
                 break  # no more rod
             left2 = index255[0]
             right2 = index255[-1]
