@@ -129,15 +129,21 @@ class LocatorBase(ProcessorBase):
                         ni = i2 - i1
                         si = i1
                         for i in range(0, ni):
+                            fi = self.frame_rods[i1 + i]
+                            oc = fi.center()
                             c = lc + dc * float(i) / ni
-                            self.frame_rods[i1 + i].recenter(c)
+                            fi.recenter(c)
+                            fi.missing = False
+                            print(f"    Fix frame [{i1 + i}] center {oc:5.2f} ==> {c:5.2f}")
             if False: # DEBUG
                 c1b = f1.center()
                 d1b = c1b - lc
+                _stars = "*" * (round(math.log(abs(d1) + 1e-6)))
+                _missing = "MISS" if f1.missing else "    "
                 if c1b == c1:
-                    print(f"@@ [{i1:05d}] --> {c1:5.2f} /\ {d1:5.2f} { '*' * (round(math.log(abs(d1) + 1e-6)))}")
+                    print(f"@@ [{i1:05d} @ {f1.frame:05d}] {_missing} --> {c1:5.2f} /\ {d1:5.2f} {_stars}")
                 else:
-                    print(f"@@ [{i1:05d}] --> {c1:5.2f} /\ {d1:5.2f} ==> {c1b:5.2f} /\ {d1b:5.2f} { '*' * (round(math.log(abs(d1) + 1e-6)))}")
+                    print(f"@@ [{i1:05d} @ {f1.frame:05d}] {_missing} --> {c1:5.2f} /\ {d1:5.2f} ==> {c1b:5.2f} /\ {d1b:5.2f} {_stars}")
             lc = c1
 
         c = np.array([fr.center() for fr in self.frame_rods])
