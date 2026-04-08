@@ -6,7 +6,7 @@ from rod import Rod
 
 ROI_WIDTH_MULTIPLIER = 4 # x rod_width_px
 ROI_HEIGHT = 400/720
-ROD_BLUR_PY = 15/720
+ROD_BLUR_PY = 11/720
 
 class Detector(ProcessorBase):
     def __init__(self, locator, inpainting="left", rod_dilate_px=31, rod_blur_px=31):
@@ -86,22 +86,24 @@ class Detector(ProcessorBase):
 
     def find_rod_by_threshold(self, roi_lu, tracked_x, tracked_y):
         # Try a basic binary mask
-        median_luminance = np.median(roi_lu)
-        trigger_luminance = (median_luminance + roi_lu[tracked_y, tracked_x]) // 2
-        mask_b = roi_lu > trigger_luminance
-        # mask_f32 = mask_u8.astype(np.float32)
+        mean_luminance = int(np.mean(roi_lu))
+        # median_luminance = int(np.median(roi_lu))
+        tracked_luminance = int(roi_lu[tracked_y, tracked_x])
+        trigger_luminance = (mean_luminance + tracked_luminance * 2) // 3
+        mask_b = roi_lu >= trigger_luminance
         mask_u8 = mask_b.astype(np.uint8) * 255
+
+        # print(f"""@@ lum mean {mean_luminance} < median {median_luminance} < tracked {tracked_luminance} --> trigger {trigger_luminance} :
+        # @@ {roi_lu[roi_lu.shape[0]//2, :]}
+        # @@ {mask_u8[roi_lu.shape[0]//2, :]}""")
 
         # Erode and dilate
         # Kernel choices: 3x3 typical, or 5x1 (vertical band) to favor vertical features.
         kernel = np.ones((5, 3), np.uint8)
-        # mask_f32 = cv2.morphologyEx(mask_f32, cv2.MORPH_OPEN, kernel, iterations=1)
-        # return mask_f32
         mask_u8 = cv2.morphologyEx(mask_u8, cv2.MORPH_OPEN, kernel, iterations=1)
 
         # Erode the mask horizontally a bit more
-        h_dilate_width = 15
-        kernel_h = np.ones((1, h_dilate_width), np.uint8)
+        kernel_h = np.ones((11, 15), np.uint8)
         mask_u8 = cv2.dilate(mask_u8, kernel_h, iterations=1)
 
         return mask_u8
@@ -204,7 +206,7 @@ class Detector(ProcessorBase):
     def inpaint_manual_left(self, wide_roi_rgb, blur_mask_u8, mask_transform=None):
         h, w, _ = wide_roi_rgb.shape
 
-        if self.rod_h_top is None:
+        if self.rod_h_top is None or self.rod_blur_py == 0:
             y_blur_0 = 0
             y_blur_1 = 0
         else:
@@ -379,6 +381,12 @@ class Detector(ProcessorBase):
         mask_u8 = self.keep_contiguous_rod(mask_u8,
             rod_x_ctr - roi_x_left,
             roi_height - 1)
+
+
+        # # DEBUG -- Finds the first row that contains at least one 255
+        # __h = self.height - roi_height + np.argmax((mask_u8 == 255).any(axis=1))
+        # self.rod_h_top = max(__h, self.rod_h_top or 0)
+        # print(f"@@ MASK HEIGHT [{frame_index:05d}] = {__h} --> {self.rod_h_top}")
 
         # TBD we could detect (and skip) spurious invalid masks based
         # on pixel count jumping too high.
