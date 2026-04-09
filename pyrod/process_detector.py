@@ -220,7 +220,6 @@ class Detector(ProcessorBase):
             index255 = np.where(blur_row == 255)[0]
             if len(index255) == 0:
                 self.update_rod_h_top(y)
-                print(f"@@ h {h}, y {y}, rod_h_top = {self.rod_h_top}, y_blur_0 {y_blur_0} --> y_blur_1 {y_blur_1}")
                 break  # no more rod
             left2 = index255[0]
             right2 = index255[-1]
@@ -257,7 +256,6 @@ class Detector(ProcessorBase):
                 mask_u8 = mask_transform(mask_u8)
             src_row_u16 = src_row.astype(np.uint16)
             dst_row_u16 = rgb_row[left2 : right0].astype(np.uint16)
-            # print(f"@@ mask_u8.shape={mask_u8.shape}, src_row_u16.shape={src_row_u16.shape}, dst_row_u16.shape={dst_row_u16.shape}")
             line_mask_u16 = (mask_u8.astype(np.uint16) * line_blend) // 256
             blended = (
                     dst_row_u16 * (255 - line_mask_u16)
@@ -269,6 +267,13 @@ class Detector(ProcessorBase):
 
     def inpaint_manual_right(self, wide_roi_rgb, blur_mask_u8, mask_transform=None):
         h, w, _ = wide_roi_rgb.shape
+
+        if self.rod_h_top is None or self.rod_blur_py == 0:
+            y_blur_0 = 0
+            y_blur_1 = 0
+        else:
+            y_blur_1 = self.rod_h_top
+            y_blur_0 = y_blur_1 + self.rod_blur_py
 
         for y in range(h-1, 0, -1):
             blur_row = blur_mask_u8[y, :]
@@ -286,6 +291,12 @@ class Detector(ProcessorBase):
             left0 = np.argmax(blur_row[:left2] > threshold)
             right0 = right2 + np.argmax(blur_row[right2:] <= threshold)
             w0 = right0 - left0
+
+            line_blend = 1
+            if y < y_blur_0:
+                dy = y_blur_0 - y
+                line_blend = 1 - self.smoothstep(dy / (y_blur_0 - y_blur_1))
+            line_blend = int(256 * line_blend)
 
             # "right" means we just mirror columns on the right (R2) part of the rod.
             # Destination: L0 (gradient) -> L2 -> (plateau) R2 (a W2 width)
@@ -307,10 +318,10 @@ class Detector(ProcessorBase):
                 mask_u8 = mask_transform(mask_u8)
             src_row_u16 = src_row.astype(np.uint16)
             dst_row_u16 = rgb_row[left0 : right2].astype(np.uint16)
-            # print(f"@@ mask_u8.shape={mask_u8.shape}, src_row_u16.shape={src_row_u16.shape}, dst_row_u16.shape={dst_row_u16.shape}")
+            line_mask_u16 = (mask_u8.astype(np.uint16) * line_blend) // 256
             blended = (
-                    dst_row_u16 * (255 - mask_u8)
-                    + src_row_u16 * mask_u8
+                    dst_row_u16 * (255 - line_mask_u16)
+                    + src_row_u16 * line_mask_u16
                 ) // 255
             rgb_row[left0 : right2] = blended.astype(np.uint8)
 
