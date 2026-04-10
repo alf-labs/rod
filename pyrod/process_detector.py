@@ -39,44 +39,48 @@ class Detector(ProcessorBase):
     def init_overlay(self, frame):
         super().init_overlay(frame)
 
-    def extract_roi_deprecated_OLD_LU(self, lu, rod_x_ctr):
+    def extract_roi(self, lu, rod_x_ctr):
         roi_x_left  = int(rod_x_ctr - self.roi_width / 2)
         roi_x_right = roi_x_left + self.roi_width
 
         roi_lu = lu[-self.roi_height:, roi_x_left:roi_x_right].copy()
 
-        # Apply CLAHE to amplify local texture detail
-        # We use a slightly lower clipLimit to avoid amplifying sensor noise too much
-        lu_clahe = self.clahe.apply(roi_lu)
+        # # Disable the CLAHE / constrast, it ruins things more than it helps.
+        # #
+        # # Apply CLAHE to amplify local texture detail
+        # # We use a slightly lower clipLimit to avoid amplifying sensor noise too much
+        # lu_clahe = self.clahe.apply(roi_lu)
 
-        # Apply Histogram Stretching (Min-Max Normalization)
-        # This stretches the resulting L channel to the full 0-255 range
-        contrast_lu = cv2.normalize(lu_clahe, None, alpha=0, beta=255, norm_type=cv2.NORM_MINMAX)
+        # # Apply Histogram Stretching (Min-Max Normalization)
+        # # This stretches the resulting L channel to the full 0-255 range
+        # contrast_lu = cv2.normalize(lu_clahe, None, alpha=0, beta=255, norm_type=cv2.NORM_MINMAX)
 
-        # for debugging, place the modified lu back into the original
-        lu[-self.roi_height:, roi_x_left:roi_x_right] = contrast_lu
+        # # for debugging, place the modified lu back into the original
+        # lu[-self.roi_height:, roi_x_left:roi_x_right] = contrast_lu
 
-        return roi_x_left, roi_lu, contrast_lu
+        return roi_x_left, roi_lu # , contrast_lu
 
     def extract_roi2(self, lab, rod_x_ctr):
         roi_x_left  = int(rod_x_ctr - self.roi_width / 2)
         roi_x_right = roi_x_left + self.roi_width
 
         roi_lab = lab[-self.roi_height:, roi_x_left:roi_x_right].copy()
-        roi_lu = roi_lab[:, :, 0]
+        # roi_lu = roi_lab[:, :, 0]
 
-        # Apply CLAHE to amplify local texture detail
-        # We use a slightly lower clipLimit to avoid amplifying sensor noise too much
-        lu_clahe = self.clahe.apply(roi_lu)
+        # Disable the CLAHE / constrast, it ruins things more than it helps.
+        #
+        # # Apply CLAHE to amplify local texture detail
+        # # We use a slightly lower clipLimit to avoid amplifying sensor noise too much
+        # lu_clahe = self.clahe.apply(roi_lu)
 
-        # Apply Histogram Stretching (Min-Max Normalization)
-        # This stretches the resulting L channel to the full 0-255 range
-        contrast_lu = cv2.normalize(lu_clahe, None, alpha=0, beta=255, norm_type=cv2.NORM_MINMAX)
-        roi_lab[:, :, 0] = contrast_lu
+        # # Apply Histogram Stretching (Min-Max Normalization)
+        # # This stretches the resulting L channel to the full 0-255 range
+        # contrast_lu = cv2.normalize(lu_clahe, None, alpha=0, beta=255, norm_type=cv2.NORM_MINMAX)
+        # roi_lab[:, :, 0] = contrast_lu
 
-        # For debugging, place the modified lu back into the original
-        # (this does get exported if view_mask is on)
-        lab[-self.roi_height:, roi_x_left:roi_x_right] = roi_lab
+        # # For debugging, place the modified lu back into the original
+        # # (this does get exported if view_mask is on)
+        # lab[-self.roi_height:, roi_x_left:roi_x_right] = roi_lab
 
         return roi_x_left, roi_lab
 
@@ -106,7 +110,7 @@ class Detector(ProcessorBase):
         else:
             return x * x * (3.0 - 2.0 * x)
 
-    def find_rod_by_threshold_deprecated_OLD_LU(self, roi_lu, tracked_x, tracked_y):
+    def find_rod_by_threshold(self, roi_lu, tracked_x, tracked_y):
         # Try a basic binary mask
         mean_luminance = int(np.mean(roi_lu))
         # median_luminance = int(np.median(roi_lu))
@@ -421,7 +425,7 @@ class Detector(ProcessorBase):
             return frame
 
         lab = cv2.cvtColor(frame, cv2.COLOR_BGR2LAB)
-        # lu = lab[:, :, 0]   # OLD_LU
+        lu = lab[:, :, 0]
 
         # -- Phase 1
         # The rod mask is computed on a ROI of ROI_WIDTH, centered on the rod tracker x.
@@ -429,25 +433,26 @@ class Detector(ProcessorBase):
         # no matter where it is located in the image horizontally.
 
         rod_x_ctr = int(rod.center())
-        # roi_x_left, roi_lu, contrast_lu = self.extract_roi(lu, rod_x_ctr)     # OLD_LU
-        roi_x_left, roi_lab = self.extract_roi2(lab, rod_x_ctr)
+        # roi_x_left, roi_lu, contrast_lu = self.extract_roi(lu, rod_x_ctr)   # OLD_LU
+        roi_x_left, roi_lu = self.extract_roi(lu, rod_x_ctr)   # OLD_LU
+        # roi_x_left, roi_lab = self.extract_roi2(lab, rod_x_ctr)   # OLD_LAB
 
         roi_height = self.roi_height
 
-        # mask_u8 = self.find_rod_by_threshold(contrast_lu,       # OLD_LU
-        #     rod_x_ctr - roi_x_left,
-        #     roi_height - 1)
-
-        mask_u8 = self.find_rod_by_threshold2(roi_lab,
+        mask_u8 = self.find_rod_by_threshold(roi_lu, # contrast_lu,     # OLD_LU
             rod_x_ctr - roi_x_left,
             roi_height - 1)
+
+        # mask_u8 = self.find_rod_by_threshold2(roi_lab,            # OLD_LAB
+        #     rod_x_ctr - roi_x_left,
+        #     roi_height - 1)
 
         mask_u8 = self.keep_contiguous_rod(mask_u8,
             rod_x_ctr - roi_x_left,
             roi_height - 1)
 
         self.history_mask, mask_u8 = self.temporal_smooth_mask_u8(
-            mask_u8, self.history_mask, weight_u8=96)           # 0 .. 64 ..[96].. 128 .. 192 .. 256
+            mask_u8, self.history_mask, weight_u8=256//4)           # 0 .. 64 ..[96].. 128 .. 192 .. 256
 
         # Disable unecessary 2nd check on continuity
         # mask_u8 = self.keep_contiguous_rod(mask_u8,
@@ -482,8 +487,8 @@ class Detector(ProcessorBase):
             self.draw_roi_bounds(roi_x_left, rod_x_ctr)
 
         if self.view_mask:
-            # return cv2.cvtColor(lu, cv2.COLOR_GRAY2BGR)     # OLD_LU
-            return cv2.cvtColor(lab, cv2.COLOR_LAB2BGR)
+            return cv2.cvtColor(lu, cv2.COLOR_GRAY2BGR)         # OLD_LU
+            # return cv2.cvtColor(lab, cv2.COLOR_LAB2BGR)     # OLD_LAB
         else:
             return frame
 
