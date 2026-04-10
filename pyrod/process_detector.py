@@ -7,9 +7,11 @@ from rod import Rod
 ROI_WIDTH_MULTIPLIER = 5 # x rod_width_px
 ROI_HEIGHT = 400/720
 ROD_BLUR_PY = 11/720
+ROD_DILATE_PX = 31
+ROD_BLUR_PX = 31
 
 class Detector(ProcessorBase):
-    def __init__(self, locator, inpainting="left", rod_dilate_px=31, rod_blur_px=31):
+    def __init__(self, locator, inpainting="left", rod_dilate_px=ROD_DILATE_PX, rod_blur_px=ROD_BLUR_PX):
         super().__init__()
         self.locator = locator
         self.clahe = cv2.createCLAHE(clipLimit=1.5, tileGridSize=(8, 8))

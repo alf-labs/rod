@@ -21,7 +21,7 @@ try:
     import scipy
     from flask import Flask, render_template, Response, request, jsonify
     from process_locator import LocatorGen, LocatorRdr
-    from process_detector import Detector
+    from process_detector import Detector, ROD_DILATE_PX, ROD_BLUR_PX
 except ModuleNotFoundError as e:
     print(f"ERROR: Missing library. {e}")
     print( "To fix: $ pip install opencv-python numpy scipy imutils flask")
@@ -95,8 +95,8 @@ class Main:
         parser.add_argument("-s", "--start", default="0", help="Start frame")
         parser.add_argument("-e", "--end", default="0", help="End/loop frame")
         parser.add_argument("-p", "--inpaint", default="left", choices=["left", "right", "mix", "telea", "navier", "none"], help="Inpaint algorithm")
-        parser.add_argument(      "--rod-dilate-px", type=int, default=21, help="Dilate filter kernel after rod detection")
-        parser.add_argument(      "--rod-blur-px", type=int, default=9, help="Blur filter kernel after rod detection")
+        parser.add_argument(      "--rod-dilate-px", type=int, default=ROD_DILATE_PX, help="Dilate filter kernel after rod detection")
+        parser.add_argument(      "--rod-blur-px", type=int, default=ROD_BLUR_PX, help="Blur filter kernel after rod detection")
         args = parser.parse_args()
         self.args = args
 
@@ -313,13 +313,10 @@ class Main:
             processor = self.processors[0]
             if not args.locator_only:
                 # Processor #1
-                if args.detector_preview:
-                    self.processors.append( Detector(processor, inpainting=None) )
-                else:
-                    self.processors.append( Detector(processor,
-                        inpainting=args.inpaint,
-                        rod_dilate_px=args.rod_dilate_px,
-                        rod_blur_px=args.rod_blur_px) )
+                self.processors.append( Detector(processor,
+                    inpainting=None if args.detector_preview else args.inpaint,
+                    rod_dilate_px=args.rod_dilate_px,
+                    rod_blur_px=args.rod_blur_px) )
             for p in self.processors:
                 p.compute_overlay = self.compute_overlay
             print(f"@@ Start with processor #{processor_idx}: {processor}")
