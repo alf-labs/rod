@@ -98,6 +98,39 @@ class LocatorBase(ProcessorBase):
         color = (0, 255, 0) if new_rod else (0, 0, 255)
         cv2.rectangle(self.overlay, (left_px, y1), (right_px, y2), color, 4)
 
+    def fix_missing_frames(self):
+        nf = len(self.frame_rods)
+        i0 = 0
+        i1 = 0
+        while i1 < nf:
+            f1 = self.frame_rods[i1]
+            if f1.missing:
+                # First missing frame... "lf" is the last non-missing frame.
+                # Now find the last missing frame.
+                i2 = i1
+                while i2 < nf and self.frame_rods[i2].missing:
+                    i2 += 1
+                # i2 is either i1 or the next non-missing frame
+                if i2 > i1:
+                    fstart = self.frame_rods[i0]
+                    fend = self.frame_rods[i2]
+                    print(f"Fix missing frames {fstart.frame}...{fend.frame}")
+                    cstart = fstart.center()
+                    cend = fend.center()
+                    ni = i2 - i0
+                    for i1 in range(i0 + 1, i2):
+                        f1 = self.frame_rods[i1]
+                        oc = f1.center()
+                        c = cstart + (cend - cstart) * float(i1 - i0) / ni
+                        f1.recenter(c)
+                        f1.missing = False
+                        print(f"    Fix frame [{f1.frame}] center {oc:5.2f} ==> {c:5.2f}")
+                    i0 = i2
+                    i1 = i2
+                    continue
+            i0 = i1
+            i1 += 1
+
     def fix_sudden_short_movements(self):
         nf = len(self.frame_rods)
         lc = self.frame_rods[0].center()
@@ -124,7 +157,7 @@ class LocatorBase(ProcessorBase):
                         # 'lc' is the starting center we want to keep (not 'c1')
                         # and 'c2' is the end center we want to keep.
                         # All rods centers from i1 (included) up to i2-1 need to be changed.
-                        print(f"Fix center for frames {i1}...{i2-1}")
+                        print(f"Fix center for frames {f1.frame}...{f2.frame - 1}")
                         dc = c2 - lc
                         ni = i2 - i1
                         si = i1
@@ -134,7 +167,7 @@ class LocatorBase(ProcessorBase):
                             c = lc + dc * float(i) / ni
                             fi.recenter(c)
                             fi.missing = False
-                            print(f"    Fix frame [{i1 + i}] center {oc:5.2f} ==> {c:5.2f}")
+                            print(f"    Fix frame [{f1.frame + i}] center {oc:5.2f} ==> {c:5.2f}")
             if False: # DEBUG
                 c1b = f1.center()
                 d1b = c1b - lc
@@ -479,6 +512,7 @@ class LocatorGen(LocatorBase):
     def release(self):
         print(f"@@ LocatorGen release")
         self.fix_sudden_short_movements()
+        self.fix_missing_frames()
         super().release()
 
 
@@ -510,6 +544,7 @@ class LocatorRdr(LocatorBase):
     def pre_release(self):
         print(f"@@ LocatorRdr pre-release")
         self.fix_sudden_short_movements()
+        self.fix_missing_frames()
 
     def export(self):
         return super().export()
