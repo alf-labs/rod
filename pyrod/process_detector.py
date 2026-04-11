@@ -7,8 +7,8 @@ from rod import Rod
 ROI_WIDTH_MULTIPLIER = 5 # x rod_width_px
 ROI_HEIGHT = 400/720
 ROD_BLUR_PY = 11/720
-ROD_DILATE_PX = 31
-ROD_BLUR_PX = 31
+ROD_DILATE_PX = 33
+ROD_BLUR_PX = 29
 
 class Detector(ProcessorBase):
     def __init__(self, locator, inpainting="left", rod_dilate_px=ROD_DILATE_PX, rod_blur_px=ROD_BLUR_PX):
