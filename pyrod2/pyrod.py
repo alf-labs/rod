@@ -248,14 +248,16 @@ class Main:
         #         print(f"Overriding input to file '{self.input_path}', frames {self.start_frame} to {self.end_frame}, {'cropped' if self.crop_roi else 'uncropped'}")
 
         display_mode = self.display_mode
+        def _mouse_callback(event, x, y, flags, param):
+            if event == cv2.EVENT_MOUSEMOVE:
+                self.mx = x
+                self.my = y
+        mouse_callback = None
         if display_mode != DISPLAY_NONE:
             cv2.namedWindow(WINDOW_TITLE, cv2.WINDOW_NORMAL)
             cv2.resizeWindow(WINDOW_TITLE, 1280//2, 720//2)
-            def _mouse_callback(event, x, y, flags, param):
-                if event == cv2.EVENT_MOUSEMOVE:
-                    self.mx = x
-                    self.my = y
-            cv2.setMouseCallback(WINDOW_TITLE, _mouse_callback)
+            mouse_callback = _mouse_callback
+            cv2.setMouseCallback(WINDOW_TITLE, mouse_callback)
 
         fourcc = cv2.VideoWriter_fourcc(*'mp4v')
         cap = cv2.VideoCapture(self.input_path)
@@ -398,6 +400,14 @@ class Main:
                     processor.init_overlay(frame)
                     if do_crop:
                         cv2.rectangle(processor.overlay, (0, 0), (cropped_width - 1, cropped_height - 1), (0,0,0), 1)
+
+                    if processor.trigger_select_roi:
+                        processor.trigger_select_roi = False
+                        processor.select_roi(WINDOW_TITLE, frame)
+                        if mouse_callback:
+                            # cv2.selectROI changes the mouse callback so we need to restore it
+                            cv2.setMouseCallback(WINDOW_TITLE, mouse_callback)
+
                     result = processor.filter(frame_count, frame)
 
                     self.print_fps(loop_s, frame_count, processor.overlay)

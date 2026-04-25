@@ -7,6 +7,7 @@ class ProcessorBase:
         self.overlay = None
         self.view_mask = False
         self.trigger_pause = False
+        self.trigger_select_roi = False
         self.downscale = 1
         self.next_processor_requested = False
         self.compute_overlay = True
@@ -47,6 +48,9 @@ class ProcessorBase:
                 + overlay_u16 * mask
             ) // 256
         return blended.astype(np.uint8)
+
+    def select_roi(self, window_title, frame):
+        pass
 
     def filter(self, frame_index, frame):
         return frame
