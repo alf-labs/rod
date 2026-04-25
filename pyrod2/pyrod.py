@@ -20,8 +20,8 @@ try:
     import imutils
     import scipy
     from flask import Flask, render_template, Response, request, jsonify
-    from process_locator import LocatorGen, LocatorRdr
-    from process_detector import Detector, ROD_DILATE_PX, ROD_BLUR_PX
+    from process_top_tracker import TopTracker
+    # from process_detector import Detector, ROD_DILATE_PX, ROD_BLUR_PX
 except ModuleNotFoundError as e:
     print(f"ERROR: Missing library. {e}")
     print( "To fix: $ pip install opencv-python numpy scipy imutils flask")
@@ -86,17 +86,19 @@ class Main:
         parser.add_argument("-o", "--output", default=OUT_VIDEO_FILE_PATH, help="Output video")
         parser.add_argument("-n", "--no-video", action="store_true", help="Skip Video Output")
         parser.add_argument(      "--overlay-video", action="store_true", help="Include Overlay in Video Output")
-        parser.add_argument(      "--no-json", action="store_true", help="Skip JSON Export")
-        parser.add_argument("-l", "--locator", default="", help="Locator JSON data to read back")
-        parser.add_argument("-0", "--locator-only", action="store_true", help="Only run locator process")
-        parser.add_argument(      "--locator-rod-sz", default="50,30,75,/1280", help="Locator Rod size/min/max")
-        parser.add_argument("-1", "--detector-preview", action="store_true", help="Run detector in preview (no inpaint)")
         parser.add_argument("-r", "--roi", default="1280x720+180", help="Center ROI w/ vertical offset")
         parser.add_argument("-s", "--start", default="0", help="Start frame")
         parser.add_argument("-e", "--end", default="0", help="End/loop frame")
-        parser.add_argument("-p", "--inpaint", default="left", choices=["left", "right", "mix", "telea", "navier", "none"], help="Inpaint algorithm")
-        parser.add_argument(      "--rod-dilate-px", type=int, default=ROD_DILATE_PX, help="Dilate filter kernel after rod detection")
-        parser.add_argument(      "--rod-blur-px", type=int, default=ROD_BLUR_PX, help="Blur filter kernel after rod detection")
+        parser.add_argument(      "--no-json", action="store_true", help="Skip JSON Export")
+
+        # parser.add_argument("-l", "--locator", default="", help="Locator JSON data to read back")
+        # parser.add_argument("-0", "--locator-only", action="store_true", help="Only run locator process")
+        # parser.add_argument(      "--locator-rod-sz", default="50,30,75,/1280", help="Locator Rod size/min/max")
+        # parser.add_argument("-1", "--detector-preview", action="store_true", help="Run detector in preview (no inpaint)")
+
+        # parser.add_argument("-p", "--inpaint", default="left", choices=["left", "right", "mix", "telea", "navier", "none"], help="Inpaint algorithm")
+        # parser.add_argument(      "--rod-dilate-px", type=int, default=ROD_DILATE_PX, help="Dilate filter kernel after rod detection")
+        # parser.add_argument(      "--rod-blur-px", type=int, default=ROD_BLUR_PX, help="Blur filter kernel after rod detection")
         args = parser.parse_args()
         self.args = args
 
@@ -108,9 +110,9 @@ class Main:
             input_idx = int(self.input_path)
             self.input_path = IN_VIDEOS[input_idx % len(IN_VIDEOS)]
 
-        if args.locator:
-            self.locator_path = args.locator
-            path_name = re.sub(r"(\D+).*", r"\1", os.path.basename(args.locator)) # stop at first digit
+        # if args.locator:
+        #     self.locator_path = args.locator
+        #     path_name = re.sub(r"(\D+).*", r"\1", os.path.basename(args.locator)) # stop at first digit
 
         self.output_path = f"{args.output}".replace("NAME", path_name)
         self.output_path = self.output_path.replace("IDX", str(input_idx))
@@ -232,18 +234,18 @@ class Main:
         stats_start_main_s = time.perf_counter()
         stats_iterations = 0
 
-        if args.locator:
-            self.read_json_file(self.locator_path)
-            if "pyrod" in self.export_content:
-                pyrod_data = self.export_content["pyrod"]
-                self.input_path = pyrod_data["input_path"]
-                start = pyrod_data["start_frame"]
-                end = pyrod_data["end_frame"]
-                self.start_frame = min(max(start, self.start_frame), end)
-                self.end_frame = self.end_frame or end
-                self.end_frame = max(start, min(self.end_frame, end))
-                self.crop_roi = pyrod_data["crop_roi"]
-                print(f"Overriding input to file '{self.input_path}', frames {self.start_frame} to {self.end_frame}, {'cropped' if self.crop_roi else 'uncropped'}")
+        # if args.locator:
+        #     self.read_json_file(self.locator_path)
+        #     if "pyrod" in self.export_content:
+        #         pyrod_data = self.export_content["pyrod"]
+        #         self.input_path = pyrod_data["input_path"]
+        #         start = pyrod_data["start_frame"]
+        #         end = pyrod_data["end_frame"]
+        #         self.start_frame = min(max(start, self.start_frame), end)
+        #         self.end_frame = self.end_frame or end
+        #         self.end_frame = max(start, min(self.end_frame, end))
+        #         self.crop_roi = pyrod_data["crop_roi"]
+        #         print(f"Overriding input to file '{self.input_path}', frames {self.start_frame} to {self.end_frame}, {'cropped' if self.crop_roi else 'uncropped'}")
 
         display_mode = self.display_mode
         if display_mode != DISPLAY_NONE:
@@ -298,25 +300,28 @@ class Main:
 
             # Processor #0
             processor_idx = 0
-            if args.locator:
-                loc_reader = LocatorRdr(
-                    locator_rod_sz_str=args.locator_rod_sz,
+            self.processors.append( TopTracker(
                     start_frame=self.start_frame,
-                )
-                self.processors.append( loc_reader )
-                loc_reader.read_json(self.export_content["locator"])
-            else:
-                self.processors.append( LocatorGen(
-                    locator_rod_sz_str=args.locator_rod_sz,
-                    start_frame=self.start_frame,
-                    ) )
+            ) )
+            # if args.locator:
+            #     loc_reader = LocatorRdr(
+            #         locator_rod_sz_str=args.locator_rod_sz,
+            #         start_frame=self.start_frame,
+            #     )
+            #     self.processors.append( loc_reader )
+            #     loc_reader.read_json(self.export_content["locator"])
+            # else:
+            #     self.processors.append( LocatorGen(
+            #         locator_rod_sz_str=args.locator_rod_sz,
+            #         start_frame=self.start_frame,
+            #         ) )
             processor = self.processors[0]
-            if not args.locator_only:
-                # Processor #1
-                self.processors.append( Detector(processor,
-                    inpainting=None if args.detector_preview else args.inpaint,
-                    rod_dilate_px=args.rod_dilate_px,
-                    rod_blur_px=args.rod_blur_px) )
+            # if not args.locator_only:
+            #     # Processor #1
+            #     self.processors.append( Detector(processor,
+            #         inpainting=None if args.detector_preview else args.inpaint,
+            #         rod_dilate_px=args.rod_dilate_px,
+            #         rod_blur_px=args.rod_blur_px) )
             for p in self.processors:
                 p.compute_overlay = self.compute_overlay
             print(f"@@ Start with processor #{processor_idx}: {processor}")
