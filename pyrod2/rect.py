@@ -16,7 +16,7 @@ class Rect:
         return int(self.x + self.w // 2), int(self.y + self.h // 2)
 
     def __repr__(self):
-        return f"Rect( {self.x:.3f}x{self.y:.3f} + {self.w:.3f} w x{self.h:.3f} h )"
+        return f"Rect( {self.x:.3f} x {self.y:.3f} + {self.w:.3f} w x {self.h:.3f} h )"
 
     def to_json(self):
         return {

@@ -5,12 +5,15 @@ from processor import ProcessorBase
 from rect import Rect
 from tracker_template import TrackerTemplate
 
+ROI_WIDTH_PCT = 1/3
+QUALITY_THRESHOLD = 0.1
 
 class CouplerTracker(ProcessorBase):
     def __init__(self, start_frame):
         super().__init__()
         self.start_frame = start_frame
         self.current_template = None
+        self.current_search_rect = None
         self.tracker_templates = {}
 
     def init_size(self, width, height):
@@ -31,18 +34,36 @@ class CouplerTracker(ProcessorBase):
             if self.current_template:
                 self.tracker_templates[frame_index] = self.current_template.copy()
 
-        search_rect = self.get_search_window(w, h)
-        search_lu = lu[search_rect.y : search_rect.y + search_rect.h, search_rect.x : search_rect.x + search_rect.w]
+        srect = self.current_search_rect
+        if srect == None:
+            srect = self.current_search_rect = self.get_search_window(w, h)
+        search_lu = lu[srect.y : srect.y + srect.h, srect.x : srect.x + srect.w]
 
         res = cv2.matchTemplate(search_lu, self.current_template.template, cv2.TM_CCOEFF_NORMED)
         min_val, max_val, min_loc, max_loc = cv2.minMaxLoc(res)
-        # Update current template with best match
-        self.current_template.rect.x = max_loc[0] + search_rect.x
-        self.current_template.rect.y = max_loc[1] + search_rect.y
 
-        self.draw_rect(search_rect, (0, 0, 255))
-        self.draw_rect(self.current_template.rect, (0, 255, 0))
-        print(f"@@ [frame #{frame_index}] --> val {max_val} at track {self.current_template.rect}")
+        med_lu = np.median(search_lu)
+        quality = max_val * med_lu / 255
+        if quality >= QUALITY_THRESHOLD:
+            # Update current template with best match
+            self.current_template.rect.x = max_loc[0] + srect.x
+            self.current_template.rect.y = max_loc[1] + srect.y
+
+
+        if self.compute_overlay:
+            self.draw_rect(srect, (0, 255, 255))
+            color = (0, 0, 255) if quality < QUALITY_THRESHOLD else (0, 255, 0)
+            self.draw_rect(self.current_template.rect, color)
+            text1 = f"{max_val:4.2f} : {quality:4.2f}"
+            texty = srect.y + srect.h - int(quality * srect.h)
+            color = (0, 0, 255) if quality < QUALITY_THRESHOLD else (0, 165, 255)
+            cv2.putText(self.overlay, text1,
+                    (srect.x, texty),           # bottom-left coord
+                    cv2.FONT_HERSHEY_DUPLEX,    # font
+                    .75,                        # font scale
+                    color,                      # color
+                    1 )                         # line thickness
+            # print(f"@@ [frame #{frame_index}] --> val {max_val} at track {self.current_template.rect}")
 
         return frame
 
@@ -75,12 +96,11 @@ class CouplerTracker(ProcessorBase):
     def get_search_window(self, width, height):
         template_rect = self.current_template.rect
         c = template_rect.center()
-        w = template_rect.w
+        w = int(ROI_WIDTH_PCT * width)
         h = template_rect.h
-        x = c[0] - w  # * 2 / 2
-        y = c[1] - h  # * 2 / 2
-        w *= 2
-        h *= 2
+        x = c[0] - w // 2
+        y = template_rect.y - h
+        h = height - y
         if x < 0:
             x = 0
         elif x + w >= width:
