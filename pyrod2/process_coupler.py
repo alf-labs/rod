@@ -3,7 +3,7 @@ import cv2
 import numpy as np
 from processor import ProcessorBase
 from rect import Rect
-from tracker_template import TrackerTemplate
+from coupler_template import CouplerTemplate
 
 ROI_WIDTH_PCT = 1/3
 QUALITY_THRESHOLD = 0.1
@@ -80,7 +80,7 @@ class CouplerTracker(ProcessorBase):
         if rect.is_empty():
             return None
         else:
-            return TrackerTemplate(
+            return CouplerTemplate(
                 frame_index,
                 rect,
                 lu[y : y + h, x : x + w].copy()
@@ -122,7 +122,7 @@ class CouplerTracker(ProcessorBase):
     def read_json(self, data):
         if "coupler_templates" in data:
             for t in data["coupler_templates"]:
-                template = TrackerTemplate.from_json(t)
+                template = CouplerTemplate.from_json(t)
                 self.tracker_templates[template.frame_index] = template
             if self.current_template == None and self.tracker_templates:
                 indices = sorted(self.tracker_templates.keys())
