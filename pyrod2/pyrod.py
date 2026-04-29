@@ -401,14 +401,12 @@ class Main:
                     if do_crop:
                         cv2.rectangle(processor.overlay, (0, 0), (cropped_width - 1, cropped_height - 1), (0,0,0), 1)
 
-                    if processor.trigger_select_roi:
-                        processor.trigger_select_roi = False
-                        processor.select_roi(WINDOW_TITLE, frame)
-                        if mouse_callback:
-                            # cv2.selectROI changes the mouse callback so we need to restore it
-                            cv2.setMouseCallback(WINDOW_TITLE, mouse_callback)
+                    result = processor.filter(WINDOW_TITLE, frame_count, frame)
 
-                    result = processor.filter(frame_count, frame)
+                    if processor.select_roi_invoked and mouse_callback:
+                        # cv2.selectROI changes the mouse callback so we need to restore it
+                        cv2.setMouseCallback(WINDOW_TITLE, mouse_callback)
+                        processor.select_roi_invoked = False
 
                     self.print_fps(loop_s, frame_count, processor.overlay)
 
