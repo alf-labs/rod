@@ -3,6 +3,7 @@ import cv2
 import numpy as np
 from processor import ProcessorBase
 from rect import Rect
+from coupler_result import CouplerResult
 from coupler_template import CouplerTemplate
 
 ROI_WIDTH_PCT = 1/3
@@ -15,6 +16,7 @@ class CouplerTracker(ProcessorBase):
         self.current_template = None
         self.current_search_rect = None
         self.tracker_templates = {}
+        self.couplers = {}
 
     def init_size(self, width, height):
         super().init_size(width, height)
@@ -37,21 +39,41 @@ class CouplerTracker(ProcessorBase):
         srect = self.current_search_rect
         if srect == None:
             srect = self.current_search_rect = self.get_search_window(w, h)
-        search_lu = lu[srect.y : srect.y + srect.h, srect.x : srect.x + srect.w]
 
-        res = cv2.matchTemplate(search_lu, self.current_template.template, cv2.TM_CCOEFF_NORMED)
-        min_val, max_val, min_loc, max_loc = cv2.minMaxLoc(res)
+        has_result = frame_index in self.couplers
 
-        med_lu = np.median(search_lu)
-        quality = max_val * med_lu / 255
-        if quality >= QUALITY_THRESHOLD:
-            # Update current template with best match
-            self.current_template.rect.x = max_loc[0] + srect.x
-            self.current_template.rect.y = max_loc[1] + srect.y
+        if not has_result:
+            search_lu = lu[srect.y : srect.y + srect.h, srect.x : srect.x + srect.w]
+            res = cv2.matchTemplate(search_lu, self.current_template.template, cv2.TM_CCOEFF_NORMED)
+            _, max_val, _, max_loc = cv2.minMaxLoc(res)
 
+            med_lu = np.median(search_lu)
+            quality = max_val * med_lu / 255
+
+            if quality >= QUALITY_THRESHOLD:
+                # Update current template with best match and add result
+                self.current_template.rect.x = max_loc[0] + srect.x
+                self.current_template.rect.y = max_loc[1] + srect.y
+                self.couplers[frame_index] = CouplerResult(
+                    frame_index = frame_index,
+                    quality = quality,
+                    center = self.current_template.rect.centerPoint(),
+                    coupler_ref = self.current_template.frame_index,
+                )
+            color = (0, 255, 255)  # debug search frame is yellow
+        else:
+            # Reuse previous result
+            result = self.couplers[frame_index]
+            # we didn't record max_val and we just need it for debug display below.
+            max_val = quality = result.quality
+            # update the display rect for debug display
+            curr_c = self.current_template.rect.center()
+            new_c = result.center
+            self.current_template.rect.moveBy(new_c.x - curr_c[0], new_c.y - curr_c[1])
+            color = (255, 255, 0)  # debug search frame is cyan
 
         if self.compute_overlay:
-            self.draw_rect(srect, (0, 255, 255))
+            self.draw_rect(srect, color)
             color = (0, 0, 255) if quality < QUALITY_THRESHOLD else (0, 255, 0)
             self.draw_rect(self.current_template.rect, color)
             text1 = f"{max_val:4.2f} : {quality:4.2f}"
@@ -114,9 +136,11 @@ class CouplerTracker(ProcessorBase):
 
     def export(self):
         print(f"@@ CouplerTracker export")
+        couplers =  [ v.to_json() for k, v in self.couplers.items() ]
         templates = [ v.to_json() for k, v in self.tracker_templates.items() ]
         return {
             "coupler_templates": templates,
+            "couplers": couplers,
         }
 
     def read_json(self, data):
@@ -131,6 +155,10 @@ class CouplerTracker(ProcessorBase):
                     self.current_template = self.tracker_templates[indices[0]]
                 else:
                     self.current_template = self.tracker_templates[indices[idx - 1]]
+        if "couplers" in data:
+            for c in data["couplers"]:
+                coupler = CouplerResult.from_json(c)
+                self.couplers[coupler.frame_index] = coupler
 
     def release(self):
         super().release()

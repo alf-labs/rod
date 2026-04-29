@@ -243,9 +243,10 @@ class Main:
                 self.input_path = pyrod_data["input_path"]
                 start = pyrod_data["start_frame"]
                 end = pyrod_data["end_frame"]
-                self.start_frame = min(max(start, self.start_frame), end)
-                self.end_frame = self.end_frame or end
-                self.end_frame = max(start, min(self.end_frame, end))
+                if start is not None:
+                    self.start_frame = int(start)
+                if end is not None:
+                    self.end_frame = int(end)
                 self.crop_roi = pyrod_data["crop_roi"]
                 print(f"Overriding input to file '{self.input_path}', frames {self.start_frame} to {self.end_frame}, {'cropped' if self.crop_roi else 'uncropped'}")
 

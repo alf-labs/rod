@@ -6,14 +6,19 @@ LATEST_JSON=$( ls -1 --sort=time output/*.json | head -n 1 )
 ARGS="--display=full --overlay-video --locator-rod-sz=30,15,50,/1280"
 ARGS="--display=full --overlay-video"
 
-if [[ "$A" == "0p0" ]]; then
-    mkdir -p output
+mkdir -p output
+
+if [[ "$A" == "0p0" ]]; then        # full run with video 0
     ( set -x
     # time ./_run.sh -i 0 --start 0:20 --end 0:45 -0 $ARGS $@
-    time ./_run.sh -i 0 $ARGS $@
+    time ./_run.sh -i 0 -0 $ARGS $@
+    )
+elif [[ "$A" == "0t0" ]]; then      # first tunnel in video 0
+    # full run with video 0
+    ( set -x
+    time ./_run.sh -i 0 --start 1:30 --end 2:00 -0 $ARGS $@
     )
 elif [[ "$A" == "1p0" ]]; then
-    mkdir -p output
     ( set -x
     # time ./_run.sh -i 0 --start 0:20 --end 0:45 -0 $ARGS $@
     time ./_run.sh -i 1 $ARGS $@

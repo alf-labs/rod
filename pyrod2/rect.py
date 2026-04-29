@@ -1,5 +1,7 @@
+from point import Point
 
 class Rect:
+    """A rectangle with integer coordinates."""
     def __init__(self, x, y, w, h):
         self.x = x
         self.y = y
@@ -12,8 +14,19 @@ class Rect:
     def copy(self):
         return Rect(self.x, self.y, self.w, self.h)
 
+    def moveTo(self, x, y):
+        self.x = x
+        self.y = y
+
+    def moveBy(self, dx, dy):
+        self.x += dx
+        self.y += dy
+
     def center(self):
         return int(self.x + self.w // 2), int(self.y + self.h // 2)
+
+    def centerPoint(self):
+        return Point(int(self.x + self.w // 2), int(self.y + self.h // 2))
 
     def __repr__(self):
         return f"Rect( {self.x:.3f} x {self.y:.3f} + {self.w:.3f} w x {self.h:.3f} h )"
