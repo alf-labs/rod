@@ -20,7 +20,7 @@ try:
     import imutils
     import scipy
     from flask import Flask, render_template, Response, request, jsonify
-    from process_top_tracker import TopTracker
+    from process_coupler import CouplerTracker
     # from process_detector import Detector, ROD_DILATE_PX, ROD_BLUR_PX
 except ModuleNotFoundError as e:
     print(f"ERROR: Missing library. {e}")
@@ -60,7 +60,7 @@ class Main:
         self.processors = []
         self.export_content = {}
         self.should_export = False
-        self.locator_path = ""
+        self.coupler_path = ""
         self.export_path = ""
         self.crop_roi = {}
 
@@ -91,7 +91,9 @@ class Main:
         parser.add_argument("-e", "--end", default="0", help="End/loop frame")
         parser.add_argument(      "--no-json", action="store_true", help="Skip JSON Export")
 
-        # parser.add_argument("-l", "--locator", default="", help="Locator JSON data to read back")
+        parser.add_argument("-0", "--coupler-only", action="store_true", help="Only run top-coupler location process")
+        parser.add_argument(      "--coupler-json", default="", help="Top-coupler JSON data to read back")
+
         # parser.add_argument("-0", "--locator-only", action="store_true", help="Only run locator process")
         # parser.add_argument(      "--locator-rod-sz", default="50,30,75,/1280", help="Locator Rod size/min/max")
         # parser.add_argument("-1", "--detector-preview", action="store_true", help="Run detector in preview (no inpaint)")
@@ -110,9 +112,9 @@ class Main:
             input_idx = int(self.input_path)
             self.input_path = IN_VIDEOS[input_idx % len(IN_VIDEOS)]
 
-        # if args.locator:
-        #     self.locator_path = args.locator
-        #     path_name = re.sub(r"(\D+).*", r"\1", os.path.basename(args.locator)) # stop at first digit
+        if args.coupler_json:
+            self.coupler_path = args.coupler_json
+            path_name = re.sub(r"(\D+).*", r"\1", os.path.basename(args.coupler_json)) # stop at first digit
 
         self.output_path = f"{args.output}".replace("NAME", path_name)
         self.output_path = self.output_path.replace("IDX", str(input_idx))
@@ -205,7 +207,7 @@ class Main:
             processor.pre_release()
             if self.write_json:
                 new_export = processor.export()
-                self.should_export = self.should_export or new_export
+                self.should_export = self.should_export or (len(new_export) > 0)
                 self.export_content.update( new_export )
             processor.release()
         processor = None
@@ -234,18 +236,18 @@ class Main:
         stats_start_main_s = time.perf_counter()
         stats_iterations = 0
 
-        # if args.locator:
-        #     self.read_json_file(self.locator_path)
-        #     if "pyrod" in self.export_content:
-        #         pyrod_data = self.export_content["pyrod"]
-        #         self.input_path = pyrod_data["input_path"]
-        #         start = pyrod_data["start_frame"]
-        #         end = pyrod_data["end_frame"]
-        #         self.start_frame = min(max(start, self.start_frame), end)
-        #         self.end_frame = self.end_frame or end
-        #         self.end_frame = max(start, min(self.end_frame, end))
-        #         self.crop_roi = pyrod_data["crop_roi"]
-        #         print(f"Overriding input to file '{self.input_path}', frames {self.start_frame} to {self.end_frame}, {'cropped' if self.crop_roi else 'uncropped'}")
+        if self.coupler_path:
+            self.read_json_file(self.coupler_path)
+            if "pyrod" in self.export_content:
+                pyrod_data = self.export_content["pyrod"]
+                self.input_path = pyrod_data["input_path"]
+                start = pyrod_data["start_frame"]
+                end = pyrod_data["end_frame"]
+                self.start_frame = min(max(start, self.start_frame), end)
+                self.end_frame = self.end_frame or end
+                self.end_frame = max(start, min(self.end_frame, end))
+                self.crop_roi = pyrod_data["crop_roi"]
+                print(f"Overriding input to file '{self.input_path}', frames {self.start_frame} to {self.end_frame}, {'cropped' if self.crop_roi else 'uncropped'}")
 
         display_mode = self.display_mode
         def _mouse_callback(event, x, y, flags, param):
@@ -302,28 +304,22 @@ class Main:
 
             # Processor #0
             processor_idx = 0
-            self.processors.append( TopTracker(
+            tracker = CouplerTracker(
                     start_frame=self.start_frame,
-            ) )
-            # if args.locator:
-            #     loc_reader = LocatorRdr(
             #         locator_rod_sz_str=args.locator_rod_sz,
-            #         start_frame=self.start_frame,
-            #     )
-            #     self.processors.append( loc_reader )
-            #     loc_reader.read_json(self.export_content["locator"])
-            # else:
-            #     self.processors.append( LocatorGen(
-            #         locator_rod_sz_str=args.locator_rod_sz,
-            #         start_frame=self.start_frame,
-            #         ) )
+            )
+            self.processors.append( tracker )
+            if self.coupler_path:
+                tracker.read_json(self.export_content)
             processor = self.processors[0]
-            # if not args.locator_only:
+
+            # if not args.coupler_only:
             #     # Processor #1
             #     self.processors.append( Detector(processor,
             #         inpainting=None if args.detector_preview else args.inpaint,
             #         rod_dilate_px=args.rod_dilate_px,
             #         rod_blur_px=args.rod_blur_px) )
+
             for p in self.processors:
                 p.compute_overlay = self.compute_overlay
             print(f"@@ Start with processor #{processor_idx}: {processor}")
@@ -451,11 +447,11 @@ class Main:
 
         finally:
             print("@@ Main loop ended.")
+            self.next_processor(processor, processor_idx)
             if writer is not None:
                 writer.release()
             if self.write_json and self.should_export:
                 self.write_json_file(self.export_path, self.export_content)
-            self.next_processor(processor, processor_idx)
             cap.release()
             if display_mode != DISPLAY_NONE:
                 cv2.destroyAllWindows()

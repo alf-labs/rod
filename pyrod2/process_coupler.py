@@ -1,14 +1,12 @@
+import bisect
 import cv2
-import math
 import numpy as np
-import re
-import scipy
 from processor import ProcessorBase
 from rect import Rect
 from tracker_template import TrackerTemplate
 
 
-class TopTracker(ProcessorBase):
+class CouplerTracker(ProcessorBase):
     def __init__(self, start_frame):
         super().__init__()
         self.start_frame = start_frame
@@ -36,9 +34,6 @@ class TopTracker(ProcessorBase):
         search_rect = self.get_search_window(w, h)
         search_lu = lu[search_rect.y : search_rect.y + search_rect.h, search_rect.x : search_rect.x + search_rect.w]
 
-        print(f"@@ DEBUG track {self.current_template.rect} in search {search_rect}")
-        print(f"@@ DEBUG track {self.current_template.template.shape} in search {search_lu.shape}")
-
         res = cv2.matchTemplate(search_lu, self.current_template.template, cv2.TM_CCOEFF_NORMED)
         min_val, max_val, min_loc, max_loc = cv2.minMaxLoc(res)
         # Update current template with best match
@@ -47,7 +42,7 @@ class TopTracker(ProcessorBase):
 
         self.draw_rect(search_rect, (0, 0, 255))
         self.draw_rect(self.current_template.rect, (0, 255, 0))
-        print(f"@@ [frame #{frame_index}] --> track {self.current_template.rect}")
+        print(f"@@ [frame #{frame_index}] --> val {max_val} at track {self.current_template.rect}")
 
         return frame
 
@@ -98,7 +93,24 @@ class TopTracker(ProcessorBase):
 
 
     def export(self):
-        return super().export()
+        print(f"@@ CouplerTracker export")
+        templates = [ v.to_json() for k, v in self.tracker_templates.items() ]
+        return {
+            "coupler_templates": templates,
+        }
+
+    def read_json(self, data):
+        if "coupler_templates" in data:
+            for t in data["coupler_templates"]:
+                template = TrackerTemplate.from_json(t)
+                self.tracker_templates[template.frame_index] = template
+            if self.current_template == None and self.tracker_templates:
+                indices = sorted(self.tracker_templates.keys())
+                idx = bisect.bisect_right(indices, self.start_frame)
+                if len(indices) == 1 or idx == 0:
+                    self.current_template = self.tracker_templates[indices[0]]
+                else:
+                    self.current_template = self.tracker_templates[indices[idx - 1]]
 
     def release(self):
         super().release()
