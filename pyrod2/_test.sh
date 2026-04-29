@@ -9,7 +9,14 @@ ARGS="--display=full --overlay-video"
 if [[ "$A" == "0p0" ]]; then
     mkdir -p output
     ( set -x
-    time ./_run.sh -i 0 --start 0:20 --end 0:45 $ARGS $@ # -0
+    # time ./_run.sh -i 0 --start 0:20 --end 0:45 -0 $ARGS $@
+    time ./_run.sh -i 0 $ARGS $@
+    )
+elif [[ "$A" == "1p0" ]]; then
+    mkdir -p output
+    ( set -x
+    # time ./_run.sh -i 0 --start 0:20 --end 0:45 -0 $ARGS $@
+    time ./_run.sh -i 1 $ARGS $@
     )
 elif [[ "$A" == "0p1" ]]; then
     ( set -x
