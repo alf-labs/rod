@@ -163,6 +163,10 @@ class CouplerTracker(ProcessorBase):
                 self.couplers[c.frame_index] = c
         self.fix_coupler_movement()
 
+    def pre_release(self):
+        self.fix_coupler_movement()
+        super().pre_release()
+
     def release(self):
         super().release()
 
@@ -296,6 +300,7 @@ class CouplerTracker(ProcessorBase):
             previous_f = self.couplers[previous_f_idx]
             x = int(x)
             y = int(y)
+            f = int(f)
             self.couplers[f] = CouplerResult(
                 frame_index = f,
                 center = Point(x, y),
