@@ -11,6 +11,10 @@ class Point:
     def delta_to(self, other):
         return (other.x - self.x, other.y - self.y)
 
+    def move_by(self, dx, dy):
+        self.x += dx
+        self.y += dy
+
     def __repr__(self):
         return f"Point( {self.x:.3f} x {self.y:.3f} )"
 
