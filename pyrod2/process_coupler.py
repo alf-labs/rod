@@ -3,6 +3,7 @@ import cv2
 import math
 import numpy as np
 from processor import ProcessorBase
+from point import Point
 from rect import Rect
 from coupler_result import CouplerResult
 from coupler_template import CouplerTemplate
@@ -57,8 +58,8 @@ class CouplerTracker(ProcessorBase):
                 self.current_template.rect.y = max_loc[1] + srect.y
                 self.couplers[frame_index] = CouplerResult(
                     frame_index = frame_index,
-                    quality = quality,
                     center = self.current_template.rect.centerPoint(),
+                    quality = quality,
                     coupler_ref = self.current_template.frame_index,
                 )
             color = (0, 255, 255)  # debug search frame is yellow
@@ -170,6 +171,7 @@ class CouplerTracker(ProcessorBase):
             return
         self.fix_y()
         self.fix_x()
+        self.fix_missing_frames()
 
     def fix_y(self):
         # 1- Filter on Y first.
@@ -200,42 +202,17 @@ class CouplerTracker(ProcessorBase):
                 print("-----------------")
             ny = fixed[idx]
             jrk = is_jerk[idx]
-            print(f"@@ [{f:04d}] y: {oy:4d} --> {ny:6.2f} ,  {'**** JRK ****' if jrk else '-'}")
-            # fix the Y in the couplers data set
-            self.couplers[f].center.move_by(0, int(ny - oy))
+            if jrk:
+                print(f"@@ [{f:04d}] y: {oy:4d} --> {ny:6.2f} ,  {'**** JRK ****' if jrk else '-'}")
+                # fix the Y in the couplers data set
+                self.couplers[f].center.move_by(0, int(ny - oy))
             last_f = f
         print(f"@@ Delta Y median: {median}, threshold: {threshold}")
 
     def fix_x(self):
         # 2- Filter on X next
         # # The coupler moves around in X so instead of cleaning the absolute X
-        # # value, we clean up the delta of X.
-
-        # last_center = None
-        # data = [] # tuples (0=frame_index, 1=x, 1=dx)
-        # for f, c in self.couplers.items():
-        #     center = c.center
-        #     if last_center is not None:
-        #         delta = last_center.delta_to(center)
-        #         # dx = abs(delta[0])
-        #         data.append( (f, center.x, delta[0] ) )
-        #     last_center = center
-
-        # values = np.array([ d[2] for d in data ])
-
-        # # Using Interquartile Range (IQR)
-        # q1, q3 = np.percentile(values, [25, 75])
-        # iqr = q3 - q1
-        # threshold = q3 + (1.5 * iqr)
-        # # is_jerk = values > threshold
-        # print(f"@@ X IQR: {iqr}, threshold {threshold}")
-
-        # # Using Median Absolute Deviation
-        # median = np.median(values)
-        # median_abs_dev = np.median(np.abs(values - median))  # median jitter around median DX
-        # threshold = median + (3 * 1.4826 * median_abs_dev)
-        # is_jerk = np.abs(values - median) > threshold
-        # print(f"@@ X Median: {median}, M.A.D. {median_abs_dev}, threshold {threshold}")
+        # # value, we use an average window combined with a median absolute deviation.
 
         # tuples (0=frame_index, 1=x)
         data = [ (f, c.center.x ) for f, c in self.couplers.items() ]
@@ -249,9 +226,9 @@ class CouplerTracker(ProcessorBase):
                 print("-----------------")
             nx = int(fixed[idx])
             jrk = nx != ox
-            print(f"@@ [{f:04d}] y: {ox:4d} --> {nx:4d} ,  {'**** JRK ****' if jrk else '-'}")
-            # fix the X in the couplers data set
             if jrk:
+                print(f"@@ [{f:04d}] y: {ox:4d} --> {nx:4d} ,  {'**** JRK ****' if jrk else '-'}")
+                # fix the X in the couplers data set
                 self.couplers[f].center.move_by(nx - ox, 0)
             last_f = f
 
@@ -286,3 +263,46 @@ class CouplerTracker(ProcessorBase):
         new_x[indices] = local_medians[outlier_mask]
 
         return new_x
+
+    def fix_missing_frames(self):
+        # 1. Convert your list of objects to NumPy arrays
+        # Assuming your object is a dictionary or has attributes
+        frames_existing = np.array([c.frame_index for c in self.couplers.values()])
+        x_existing = np.array([c.center.x for c in self.couplers.values()])
+        y_existing = np.array([c.center.y for c in self.couplers.values()])
+
+        # 2. Define the full range of frames you want (e.g., from first to last)
+        all_frames = np.arange(frames_existing.min(), frames_existing.max() + 1)
+
+        # 3. Find which frames are actually missing
+        missing_mask = np.isin(all_frames, frames_existing, invert=True)
+        missing_frames = all_frames[missing_mask]
+        print(f"@@ {len(missing_frames)} missing frames to interpolate")
+
+        # 4. Use np.interp to find the X and Y for all missing frames at once
+        # np.interp(target_x, known_x, known_y)
+        interp_x = np.interp(missing_frames, frames_existing, x_existing)
+        interp_y = np.interp(missing_frames, frames_existing, y_existing)
+
+        # 5. Pack them back into your object format
+
+        # Build a list, similar to bisect_right mapping all misisng frames numbers to the
+        # rightmost existing frame index. That's really an insertion index which we convert
+        # below to a frame_index number.
+        insertion_indices = np.searchsorted(frames_existing, missing_frames, side='right')
+
+        for ins, f, x, y in zip(insertion_indices, missing_frames, interp_x, interp_y):
+            previous_f_idx = frames_existing[ins - 1] if ins > 0 else frames_existing[0]
+            previous_f = self.couplers[previous_f_idx]
+            x = int(x)
+            y = int(y)
+            self.couplers[f] = CouplerResult(
+                frame_index = f,
+                center = Point(x, y),
+                quality = 0,  # remember it was a missing frame of low quality
+                coupler_ref = previous_f.coupler_ref,
+            )
+            print(f"@@ INTERP [{previous_f_idx:04d}] -> {self.couplers[f]}")
+
+        # Finally sort the dictionary by key to maintain a consistent frame ordering
+        self.couplers = dict(sorted(self.couplers.items()))

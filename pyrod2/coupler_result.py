@@ -33,3 +33,6 @@ class CouplerResult:
             quality = float(params["q"]),
             coupler_ref = int(params["r"]),
         )
+
+    def __repr__(self):
+        return f"CouplerResult( [{self.frame_index:.3f}] {self.center}, qual {self.quality:.3f}, ref {self.coupler_ref:4d} )"
