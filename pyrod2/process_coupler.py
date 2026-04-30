@@ -168,30 +168,37 @@ class CouplerTracker(ProcessorBase):
     def fix_coupler_movement(self):
         if not self.couplers:
             return
+        self.fix_y()
+        self.fix_x()
 
+    def fix_y(self):
         # 1- Filter on Y first.
 
+        # By design, the coupler is generally at the same height, within a certain window.
+        # This computes the median position and a threshold outside of the typical position.
+        # We then fix just the values outside the median's threshold.
+
         # tuples (0=frame_index, 1=y)
-        data_y = [ (f, c.center.y ) for f, c in self.couplers.items() ]
-        all_y = np.array([ d[1] for d in data_y ])
+        data = [ (f, c.center.y ) for f, c in self.couplers.items() ]
+        values = np.array([ d[1] for d in data ])
 
         # Using Median Absolute Deviation
-        median = np.median(all_y)
-        median_abs_dev = np.median(np.abs(all_y - median))  # median jitter around median Y
+        median = np.median(values)
+        median_abs_dev = np.median(np.abs(values - median))  # median jitter around median Y
         # threshold = median + (3 * 1.4826 * median_abs_dev)
         threshold = 5 * median_abs_dev
-        is_jerk = np.abs(all_y - median) > threshold
+        is_jerk = np.abs(values - median) > threshold
 
         # Interpolate the incorect Y positions
-        np_indices = np.arange(len(all_y))
-        all_y_fixed = np.interp(np_indices, np_indices[~is_jerk], all_y[~is_jerk])
+        np_indices = np.arange(len(values))
+        fixed = np.interp(np_indices, np_indices[~is_jerk], values[~is_jerk])
 
         last_f = 0
-        for idx, d in enumerate(data_y):
+        for idx, d in enumerate(data):
             f, oy = d
             if f != last_f + 1:
                 print("-----------------")
-            ny = all_y_fixed[idx]
+            ny = fixed[idx]
             jrk = is_jerk[idx]
             print(f"@@ [{f:04d}] y: {oy:4d} --> {ny:6.2f} ,  {'**** JRK ****' if jrk else '-'}")
             # fix the Y in the couplers data set
@@ -199,23 +206,83 @@ class CouplerTracker(ProcessorBase):
             last_f = f
         print(f"@@ Delta Y median: {median}, threshold: {threshold}")
 
+    def fix_x(self):
         # 2- Filter on X next
+        # # The coupler moves around in X so instead of cleaning the absolute X
+        # # value, we clean up the delta of X.
 
         # last_center = None
-        # data = [] # tuples (0=frame_index, 1=dx, 2=y)
+        # data = [] # tuples (0=frame_index, 1=x, 1=dx)
         # for f, c in self.couplers.items():
         #     center = c.center
         #     if last_center is not None:
         #         delta = last_center.delta_to(center)
-        #         dx = abs(delta[0])
-        #         dy = abs(delta[1])
-        #         data.append( (f, dx, center.y ) )
+        #         # dx = abs(delta[0])
+        #         data.append( (f, center.x, delta[0] ) )
         #     last_center = center
 
-        # deltas_m = np.array([ d[3] for d in data ])
+        # values = np.array([ d[2] for d in data ])
 
         # # Using Interquartile Range (IQR)
-        # q1, q3 = np.percentile(deltas_y, [25, 75])
+        # q1, q3 = np.percentile(values, [25, 75])
         # iqr = q3 - q1
         # threshold = q3 + (1.5 * iqr)
-        # is_jerk = deltas_y > threshold
+        # # is_jerk = values > threshold
+        # print(f"@@ X IQR: {iqr}, threshold {threshold}")
+
+        # # Using Median Absolute Deviation
+        # median = np.median(values)
+        # median_abs_dev = np.median(np.abs(values - median))  # median jitter around median DX
+        # threshold = median + (3 * 1.4826 * median_abs_dev)
+        # is_jerk = np.abs(values - median) > threshold
+        # print(f"@@ X Median: {median}, M.A.D. {median_abs_dev}, threshold {threshold}")
+
+        # tuples (0=frame_index, 1=x)
+        data = [ (f, c.center.x ) for f, c in self.couplers.items() ]
+        values = np.array([ d[1] for d in data ])
+        fixed = self.hampel_filter_numpy(values)
+
+        last_f = 0
+        for idx, d in enumerate(data):
+            f, ox = d
+            if f != last_f + 1:
+                print("-----------------")
+            nx = int(fixed[idx])
+            jrk = nx != ox
+            print(f"@@ [{f:04d}] y: {ox:4d} --> {nx:4d} ,  {'**** JRK ****' if jrk else '-'}")
+            # fix the X in the couplers data set
+            if jrk:
+                self.couplers[f].center.move_by(nx - ox, 0)
+            last_f = f
+
+    def hampel_filter_numpy(self, x, window_size=10, n_sigmas=3):
+        """
+        x: 1D numpy array (X positions)
+        window_size: Look-ahead/look-back distance (total window is 2*window_size + 1)
+        n_sigmas: Sensitivity (lower is more aggressive)
+        """
+        n = len(x)
+        new_x = x.copy()
+        k = 1.4826 # Scale factor for Gaussian distribution
+
+        # Create a sliding window view
+        # This creates a virtual (N, window_len) array without copying memory
+        full_window = 2 * window_size + 1
+        views = np.lib.stride_tricks.sliding_window_view(x, full_window)
+
+        # Calculate local medians and MADs
+        local_medians = np.median(views, axis=1)
+        local_mads = k * np.median(np.abs(views - local_medians[:, None]), axis=1)
+
+        # We need to pad the results because sliding_window reduces the array size
+        # We'll pad with the original values for the edges
+        pad = window_size
+        diff = np.abs(x[pad:-pad] - local_medians)
+        outlier_mask = diff > (n_sigmas * local_mads)
+
+        # Replace outliers with local median
+        # We offset by 'pad' because 'outlier_mask' corresponds to the center of the windows
+        indices = np.where(outlier_mask)[0] + pad
+        new_x[indices] = local_medians[outlier_mask]
+
+        return new_x
