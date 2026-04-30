@@ -8,6 +8,9 @@ class Point:
     def copy(self):
         return Point(self.x, self.y)
 
+    def delta_to(self, other):
+        return (other.x - self.x, other.y - self.y)
+
     def __repr__(self):
         return f"Point( {self.x:.3f} x {self.y:.3f} )"
 
