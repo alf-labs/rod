@@ -242,16 +242,21 @@ class CouplerTracker(ProcessorBase):
             nx = int(fixed[idx])
             jrk = nx != ox
             if jrk:
-                print(f"@@ [{f:04d}] x: {ox:4d} --> {nx:4d} ,  {'**** JRK ****' if jrk else '-'}")
+                real_jrk = abs(nx - ox) > 1
+                print(f"@@ [{f:04d}] x: {ox:4d} --> {nx:4d} ,  {'**** X-JRK ****' if real_jrk else '-'}")
                 # fix the X in the couplers data set
                 self.couplers[f].center.move_by(nx - ox, 0)
             last_f = f
 
-    def hampel_filter_numpy(self, x, window_size=10, n_sigmas=3):
+    def hampel_filter_numpy(self, x, window_size=10, n_sigmas=2.5):
         """
         x: 1D numpy array (X positions)
         window_size: Look-ahead/look-back distance (total window is 2*window_size + 1)
         n_sigmas: Sensitivity (lower is more aggressive)
+
+        Note: if outliers seemed to not be cleaned, that typically means the threshold is
+        too high -- try lowering n_sigmas in this case. A smaller window also means a more
+        localized median, which can help make smoothing more aggresive.
         """
         n = len(x)
         new_x = x.copy()
@@ -261,22 +266,31 @@ class CouplerTracker(ProcessorBase):
         # This creates a virtual (N, window_len) array without copying memory
         full_window = 2 * window_size + 1
         views = np.lib.stride_tricks.sliding_window_view(x, full_window)
+        print(f"@@ X views[{len(views), views.shape}]: {views}")
+        pad = window_size
+        nn = 4120 ; print(f"@@ X x[{nn}]={x[nn]} views[{nn}={nn-pad}]: {views[nn-pad]}")
+        nn = 4121 ; print(f"@@ X x[{nn}]={x[nn]} views[{nn}={nn-pad}]: {views[nn-pad]}")
+        nn = 4122 ; print(f"@@ X x[{nn}]={x[nn]} views[{nn}={nn-pad}]: {views[nn-pad]}")
+        nn = 4123 ; print(f"@@ X x[{nn}]={x[nn]} views[{nn}={nn-pad}]: {views[nn-pad]}")
+        nn = 4124 ; print(f"@@ X x[{nn}]={x[nn]} views[{nn}={nn-pad}]: {views[nn-pad]}")
 
         # Calculate local medians and MADs
         local_medians = np.median(views, axis=1)
         local_mads = k * np.median(np.abs(views - local_medians[:, None]), axis=1)
 
-        print(f"@@ X LOCAL MED: {local_medians[4110:4130]}")
-        print(f"@@ X LOCAL MAD: {local_mads[4110:4130]}")
+        print(f"@@ X values[{len(x)}]: {x[4120:4124]}")
+        print(f"@@ X local_medians[{len(local_medians)}]: {local_medians[4120-pad:4124-pad]}")
+        print(f"@@ X local_mads[{len(local_mads)}]: {local_mads[4120-pad:4124-pad]}")
 
         # We need to pad the results because sliding_window reduces the array size
         # We'll pad with the original values for the edges
-        pad = window_size
         diff = np.abs(x[pad:-pad] - local_medians)
-        outlier_mask = diff > (n_sigmas * local_mads)
+        thresholds = n_sigmas * local_mads
+        outlier_mask = diff > thresholds
 
-        print(f"@@ X DIFF: {diff[4110:4130]}")
-        print(f"@@ X MASK: {outlier_mask[4110:4130]}")
+        print(f"@@ X diff[{len(diff)}]: {diff[4120-pad:4124-pad]}")
+        print(f"@@ X thresholds[{len(thresholds)}]: {thresholds[4120-pad:4124-pad]}")
+        print(f"@@ X outlier_maks[{len(outlier_mask)}]: {outlier_mask[4120-pad:4124-pad]}")
 
 
         # Replace outliers with local median
