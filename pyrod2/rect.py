@@ -14,11 +14,11 @@ class Rect:
     def copy(self):
         return Rect(self.x, self.y, self.w, self.h)
 
-    def moveTo(self, x, y):
+    def move_to(self, x, y):
         self.x = x
         self.y = y
 
-    def moveBy(self, dx, dy):
+    def move_by(self, dx, dy):
         self.x += dx
         self.y += dy
 

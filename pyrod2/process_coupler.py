@@ -19,6 +19,7 @@ class CouplerTracker(ProcessorBase):
         self.current_search_rect = None
         self.tracker_templates = {}
         self.couplers = {}
+        self.couplers_fixed = False
 
     def init_size(self, width, height):
         super().init_size(width, height)
@@ -27,19 +28,26 @@ class CouplerTracker(ProcessorBase):
         super().init_overlay(frame)
 
     def filter(self, window_title, frame_index, frame):
+        if ( (frame_index == self.start_frame or self.start_frame == 0)
+            and self.couplers_fixed
+            and len(self.tracker_templates) > 0
+            and len(self.couplers) > 0):
+            self.next_processor_requested = True
+            return frame
+
         h, w = frame.shape[:2]
         lab = cv2.cvtColor(frame, cv2.COLOR_BGR2LAB)
         lu = lab[:, :, 0]
         frame = cv2.cvtColor(lu, cv2.COLOR_GRAY2BGR)
 
-        while self.current_template == None:
+        while self.current_template is None:
             print(f"@@ [frame #{frame_index}] Select a valid top coupler area to continue.")
             self.current_template = self.select_roi(window_title, frame_index, frame, lu)
             if self.current_template:
                 self.tracker_templates[frame_index] = self.current_template.copy()
 
         srect = self.current_search_rect
-        if srect == None:
+        if srect is None:
             srect = self.current_search_rect = self.get_search_window(w, h)
 
         has_result = frame_index in self.couplers
@@ -71,7 +79,7 @@ class CouplerTracker(ProcessorBase):
             # update the display rect for debug display
             curr_c = self.current_template.rect.center()
             new_c = result.center
-            self.current_template.rect.moveBy(new_c.x - curr_c[0], new_c.y - curr_c[1])
+            self.current_template.rect.move_by(new_c.x - curr_c[0], new_c.y - curr_c[1])
             color = (255, 255, 0)  # debug search frame is cyan
 
         if self.compute_overlay:
@@ -149,7 +157,7 @@ class CouplerTracker(ProcessorBase):
             for t in data["coupler_templates"]:
                 template = CouplerTemplate.from_json(t)
                 self.tracker_templates[template.frame_index] = template
-            if self.current_template == None and self.tracker_templates:
+            if self.current_template is None and self.tracker_templates:
                 indices = sorted(self.tracker_templates.keys())
                 idx = bisect.bisect_right(indices, self.start_frame)
                 if len(indices) == 1 or idx == 0:
@@ -173,9 +181,11 @@ class CouplerTracker(ProcessorBase):
     def fix_coupler_movement(self):
         if not self.couplers:
             return
-        self.fix_y()
-        self.fix_x()
-        self.fix_missing_frames()
+        if not self.couplers_fixed:
+            self.fix_y()
+            self.fix_x()
+            self.fix_missing_frames()
+            self.couplers_fixed = True
 
     def fix_y(self):
         # 1- Filter on Y first.

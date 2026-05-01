@@ -21,7 +21,7 @@ try:
     import scipy
     from flask import Flask, render_template, Response, request, jsonify
     from process_coupler import CouplerTracker
-    # from process_detector import Detector, ROD_DILATE_PX, ROD_BLUR_PX
+    from process_detector import RodDetector #, ROD_DILATE_PX, ROD_BLUR_PX
 except ModuleNotFoundError as e:
     print(f"ERROR: Missing library. {e}")
     print( "To fix: $ pip install opencv-python numpy scipy imutils flask")
@@ -96,7 +96,7 @@ class Main:
 
         # parser.add_argument("-0", "--locator-only", action="store_true", help="Only run locator process")
         # parser.add_argument(      "--locator-rod-sz", default="50,30,75,/1280", help="Locator Rod size/min/max")
-        # parser.add_argument("-1", "--detector-preview", action="store_true", help="Run detector in preview (no inpaint)")
+        parser.add_argument("-1", "--detector-preview", action="store_true", help="Run detector in preview (no inpaint)")
 
         # parser.add_argument("-p", "--inpaint", default="left", choices=["left", "right", "mix", "telea", "navier", "none"], help="Inpaint algorithm")
         # parser.add_argument(      "--rod-dilate-px", type=int, default=ROD_DILATE_PX, help="Dilate filter kernel after rod detection")
@@ -314,8 +314,11 @@ class Main:
                 tracker.read_json(self.export_content)
             processor = self.processors[0]
 
-            # if not args.coupler_only:
-            #     # Processor #1
+            if not args.coupler_only:
+                # Processor #1
+                self.processors.append( RodDetector(
+                    tracker
+                ))
             #     self.processors.append( Detector(processor,
             #         inpainting=None if args.detector_preview else args.inpaint,
             #         rod_dilate_px=args.rod_dilate_px,
@@ -461,7 +464,7 @@ class Main:
         stats_duration_s = int(stats_end_main_s - stats_start_main_s)
         stats_iterations = max(1, stats_iterations)
         stats_ms = 1000.0 * stats_duration_s / stats_iterations
-        stats_fps = stats_iterations / stats_duration_s
+        stats_fps = stats_iterations / stats_duration_s if stats_duration_s > 0 else 0
         print(f"@@ Stats: {stats_iterations} frames in {stats_duration_s // 60} min {stats_duration_s % 60} sec; {stats_ms:.2f} ms/frame; {stats_fps:.2f} fps")
 
         print("@@ end")
