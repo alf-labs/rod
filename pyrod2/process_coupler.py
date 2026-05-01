@@ -173,15 +173,9 @@ class CouplerTracker(ProcessorBase):
     def fix_coupler_movement(self):
         if not self.couplers:
             return
-        for f, c in self.couplers.items():
-            print(f"@@ ORIG [{f:04d}] c: {c.center.x:4d} x {c.center.y:4d}")
-
         self.fix_y()
         self.fix_x()
         self.fix_missing_frames()
-        for f, c in self.couplers.items():
-            print(f"@@ RESULT [{f:04d}] c: {c.center.x:4d} x {c.center.y:4d}")
-
 
     def fix_y(self):
         # 1- Filter on Y first.
@@ -208,12 +202,14 @@ class CouplerTracker(ProcessorBase):
         last_f = 0
         for idx, d in enumerate(data):
             f, oy = d
-            if f != last_f + 1:
-                print("-----------------")
+            # DEBUG print
+            # if f != last_f + 1:
+            #     print("-----------------")
             ny = fixed[idx]
             jrk = is_jerk[idx]
             if jrk:
-                print(f"@@ [{f:04d}] y: {oy:4d} --> {ny:6.2f} ,  {'**** JRK ****' if jrk else '-'}")
+                # DEBUG print
+                # print(f"@@ [{f:04d}] y: {oy:4d} --> {ny:6.2f} ,  {'**** JRK ****' if jrk else '-'}")
                 # fix the Y in the couplers data set
                 self.couplers[f].center.move_by(0, int(ny - oy))
             last_f = f
@@ -229,21 +225,18 @@ class CouplerTracker(ProcessorBase):
         values = np.array([ d[1] for d in data ])
         fixed = self.hampel_filter_numpy(values)
 
-        print(f"@@ LEN data {len(data)} (frame {data[0][0]} to {data[-1][0]}), fixed {len(fixed)}")
-        nn = 4121 ; print(f"@@ {nn} data {data[nn]} vs fixed {fixed[nn]}" )
-        nn = 4122 ; print(f"@@ {nn} data {data[nn]} vs fixed {fixed[nn]}" )
-        nn = 4123 ; print(f"@@ {nn} data {data[nn]} vs fixed {fixed[nn]}" )
-
         last_f = 0
         for idx, d in enumerate(data):
             f, ox = d
-            if f != last_f + 1:
-                print("-----------------")
+            # DEBUG print
+            # if f != last_f + 1:
+            #     print("-----------------")
             nx = int(fixed[idx])
             jrk = nx != ox
             if jrk:
-                real_jrk = abs(nx - ox) > 1
-                print(f"@@ [{f:04d}] x: {ox:4d} --> {nx:4d} ,  {'**** X-JRK ****' if real_jrk else '-'}")
+                # DEBUG print
+                # real_jrk = abs(nx - ox) > 1
+                # print(f"@@ [{f:04d}] x: {ox:4d} --> {nx:4d} ,  {'**** X-JRK ****' if real_jrk else '-'}")
                 # fix the X in the couplers data set
                 self.couplers[f].center.move_by(nx - ox, 0)
             last_f = f
@@ -264,42 +257,25 @@ class CouplerTracker(ProcessorBase):
 
         # Create a sliding window view
         # This creates a virtual (N, window_len) array without copying memory
+        pad = window_size
         full_window = 2 * window_size + 1
         views = np.lib.stride_tricks.sliding_window_view(x, full_window)
-        print(f"@@ X views[{len(views), views.shape}]: {views}")
-        pad = window_size
-        nn = 4120 ; print(f"@@ X x[{nn}]={x[nn]} views[{nn}={nn-pad}]: {views[nn-pad]}")
-        nn = 4121 ; print(f"@@ X x[{nn}]={x[nn]} views[{nn}={nn-pad}]: {views[nn-pad]}")
-        nn = 4122 ; print(f"@@ X x[{nn}]={x[nn]} views[{nn}={nn-pad}]: {views[nn-pad]}")
-        nn = 4123 ; print(f"@@ X x[{nn}]={x[nn]} views[{nn}={nn-pad}]: {views[nn-pad]}")
-        nn = 4124 ; print(f"@@ X x[{nn}]={x[nn]} views[{nn}={nn-pad}]: {views[nn-pad]}")
 
         # Calculate local medians and MADs
         local_medians = np.median(views, axis=1)
         local_mads = k * np.median(np.abs(views - local_medians[:, None]), axis=1)
-
-        print(f"@@ X values[{len(x)}]: {x[4120:4124]}")
-        print(f"@@ X local_medians[{len(local_medians)}]: {local_medians[4120-pad:4124-pad]}")
-        print(f"@@ X local_mads[{len(local_mads)}]: {local_mads[4120-pad:4124-pad]}")
 
         # We need to pad the results because sliding_window reduces the array size
         # We'll pad with the original values for the edges
         diff = np.abs(x[pad:-pad] - local_medians)
         thresholds = n_sigmas * local_mads
         outlier_mask = diff > thresholds
-
-        print(f"@@ X diff[{len(diff)}]: {diff[4120-pad:4124-pad]}")
-        print(f"@@ X thresholds[{len(thresholds)}]: {thresholds[4120-pad:4124-pad]}")
-        print(f"@@ X outlier_maks[{len(outlier_mask)}]: {outlier_mask[4120-pad:4124-pad]}")
-
+        print(f"@@ Delta X median: {np.median(local_medians)}, threshold: {np.median(thresholds):4.2f}, {np.count_nonzero(outlier_mask)} outliers")
 
         # Replace outliers with local median
         # We offset by 'pad' because 'outlier_mask' corresponds to the center of the windows
         indices = np.where(outlier_mask)[0] + pad
         new_x[indices] = local_medians[outlier_mask]
-        print(f"@@ X Outlier Indices: {indices}")
-        print(f"@@ X Outlier OLD: {x[indices]}")
-        print(f"@@ X Outlier NEW: {new_x[indices]}")
 
         return new_x
 
