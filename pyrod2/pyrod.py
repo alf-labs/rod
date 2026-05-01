@@ -241,11 +241,11 @@ class Main:
             if "pyrod" in self.export_content:
                 pyrod_data = self.export_content["pyrod"]
                 self.input_path = pyrod_data["input_path"]
-                start = pyrod_data["start_frame"]
-                end = pyrod_data["end_frame"]
-                if start is not None:
+                if "start_frame" in pyrod_data:
+                    start = pyrod_data["start_frame"]
                     self.start_frame = int(start)
-                if end is not None:
+                if "end_frame" in pyrod_data:
+                    end = pyrod_data["end_frame"]
                     self.end_frame = int(end)
                 self.crop_roi = pyrod_data["crop_roi"]
                 print(f"Overriding input to file '{self.input_path}', frames {self.start_frame} to {self.end_frame}, {'cropped' if self.crop_roi else 'uncropped'}")
