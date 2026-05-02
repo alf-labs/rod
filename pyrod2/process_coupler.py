@@ -41,10 +41,11 @@ class CouplerTracker(ProcessorBase):
         frame = cv2.cvtColor(lu, cv2.COLOR_GRAY2BGR)
 
         while self.current_template is None:
-            print(f"@@ [frame #{frame_index}] Select a valid top coupler area to continue.")
+            print(f"@@ [frame #{frame_index:04d}] Select a valid top coupler area to continue.")
             self.current_template = self.select_roi(window_title, frame_index, frame, lu)
             if self.current_template:
                 self.tracker_templates[frame_index] = self.current_template.copy()
+                print(f"@@ [frame #{frame_index:04d}] coupler {self.current_template.rect}, center {self.current_template.rect.center()}")
 
         srect = self.current_search_rect
         if srect is None:
@@ -161,9 +162,9 @@ class CouplerTracker(ProcessorBase):
                 indices = sorted(self.tracker_templates.keys())
                 idx = bisect.bisect_right(indices, self.start_frame)
                 if len(indices) == 1 or idx == 0:
-                    self.current_template = self.tracker_templates[indices[0]]
+                    self.current_template = self.tracker_templates[indices[0]].copy()
                 else:
-                    self.current_template = self.tracker_templates[indices[idx - 1]]
+                    self.current_template = self.tracker_templates[indices[idx - 1]].copy()
         if "couplers" in data:
             couplers = [CouplerResult.from_json(c) for c in data["couplers"]]
             couplers.sort(key=lambda c: c.frame_index)

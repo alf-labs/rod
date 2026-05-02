@@ -22,6 +22,24 @@ class Rect:
         self.x += dx
         self.y += dy
 
+    def recenter_to(self, cx, cy):
+        ocx = int(self.x + self.w // 2)
+        ocy = int(self.y + self.h // 2)
+        dx = cx - ocx
+        dy = cy - ocy
+        self.x += dx
+        self.y += dy
+
+    def scale_by(self, sx, sy):
+        if sx != 1.0:
+            cx = self.x + self.w // 2
+            nw = self.w = int(self.w * sx)
+            self.x = cx - nw // 2
+        if sy != 1.0:
+            cy = self.y + self.h // 2
+            nh = self.h = int(self.h * sy)
+            self.y = cy - nh // 2
+
     def center(self):
         return int(self.x + self.w // 2), int(self.y + self.h // 2)
 
