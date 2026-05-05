@@ -28,7 +28,6 @@ class RodDetector(ProcessorBase):
         h, w = frame.shape[:2]
         lab = cv2.cvtColor(frame, cv2.COLOR_BGR2LAB)
         lu = lab[:, :, 0]
-        frame = cv2.cvtColor(lu, cv2.COLOR_GRAY2BGR)
 
         coupler = self.couplers[frame_index]
         if coupler is None:
@@ -52,8 +51,13 @@ class RodDetector(ProcessorBase):
             self.draw_rect(cr,    (255, 128, 0))
 
         # Experiment 1: Use a few lines to run a CV computation, and display it.
-        self.experimental_cv_search(w, h, lu, cr)
+        # self.experimental_cv_search(w, h, lu, cr)
 
+        # Experiment 2: Re-implement the old Lua process
+        self.experimental_lua_search(w, h, lu, cr)
+
+        # For debug purposes, we display any changes made to the LU image.
+        frame = cv2.cvtColor(lu, cv2.COLOR_GRAY2BGR)
         return frame
 
     def draw_rect(self, rect, color, width=2):
@@ -69,13 +73,19 @@ class RodDetector(ProcessorBase):
         x1 = rect.x
         y1 = rect.y + rect.h
         ox = x1
-        oy = int(y1 - data[0])
+        oy = y1 - int(data[0])
         for k in range(1, n):
             nx = int(x1 + k * fx)
-            ny = int(y1 - data[k])
+            ny = y1 - int(data[k])
             cv2.line(self.overlay, (ox, oy), (nx, ny), color, width)
             ox = nx
             oy = ny
+
+    def draw_threshold(self, y, rect, color, width=1):
+        x1 = rect.x
+        x2 = x1 + rect.w
+        y1 = rect.y + rect.h - y
+        cv2.line(self.overlay, (x1, y1), (x2, y1), color, width)
 
     def get_search_window(self, width, height, coupler_template):
         template_rect = coupler_template.rect.copy()
@@ -132,3 +142,53 @@ class RodDetector(ProcessorBase):
         cv_array = np.divide(stds, means, out=np.zeros_like(stds), where=means > 0)
 
         return cv_array
+
+    def experimental_lua_search(self, w, h, lu, cr):
+        """Experiment 2: Reimplement the old pixel-based Lua search."""
+
+        # SR: The actual search rect. It's located just below the coupler area (cr)
+        sr = cr.copy()
+        sr.move_by(0, cr.h)
+        sr.scale_by(SEARCH_WIDTH_PCT, 1.0)
+
+        x1 = sr.x
+        x2 = sr.x + sr.w
+        yt = sr.y
+        yb = h
+        y_half = (yt + yb) // 2
+
+        for y1 in range(yt, yb):
+            # for testing we just look at a single line (it's a 1,N 2d array though)
+            y_lu = lu[y1 : y1 + 1, x1 : x2]
+
+            # the Lua algorithm was manually computing the lu min/max and delta.
+            # this is basically a normalization.
+            if y1 < y_half: # compare the 2 versions
+                # Option 1:
+                norm_y_lu = cv2.normalize(y_lu, None, alpha=0, beta=255, norm_type=cv2.NORM_MINMAX)
+            else:
+                # Option 2: use a percentile to avoid outlier black/white pixels
+                p2, p98 = np.percentile(y_lu, [2, 98])
+                # Clip values to the percentiles, then stretch
+                line_clipped = np.clip(y_lu, p2, p98)
+                norm_y_lu = cv2.normalize(line_clipped, None, 0, 255, cv2.NORM_MINMAX)
+
+            # print(f"@@ [{y1}] sr_y_lu = {y_lu}")
+            # print(f"@@ [{y1}] norm_y_lu = {norm_y_lu}")
+            debug_y_lu = norm_y_lu
+
+            # debug
+            if self.compute_overlay:
+                # we also place the values back into LU for display
+                lu[y1 : y1 + 1, x1 : x2] = debug_y_lu
+                # display the curve at the bottom of the SR rect
+                if y1 == sr.y + sr.h - 1:
+                    self.draw_rect(sr,    (  0, 255, 0), width=1)
+                    # ravel() flattens 2d --> 1d
+                    flat = norm_y_lu.ravel() / 255 * sr.h
+                    self.draw_curve(flat, sr, (0, 255, 255))
+                    f_med = int(np.median(flat))
+                    self.draw_threshold(f_med, sr, (0, 165, 255)) # orange
+                    sr.move_by(0, sr.h)
+
+# ~~

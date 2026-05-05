@@ -89,7 +89,7 @@ class CouplerTracker(ProcessorBase):
             self.draw_rect(self.current_template.rect, color)
             text1 = f"{max_val:4.2f} : {quality:4.2f}"
             texty = srect.y + srect.h - int(quality * srect.h)
-            color = (0, 0, 255) if quality < QUALITY_THRESHOLD else (0, 165, 255)
+            color = (0, 0, 255) if quality < QUALITY_THRESHOLD else (0, 165, 255) # orange
             cv2.putText(self.overlay, text1,
                     (srect.x, texty),           # bottom-left coord
                     cv2.FONT_HERSHEY_DUPLEX,    # font
