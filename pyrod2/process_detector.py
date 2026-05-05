@@ -36,29 +36,23 @@ class RodDetector(ProcessorBase):
         if self.current_template is None:
             self.current_template = self.tracker_templates[coupler.coupler_ref]
         coupler_template = self.current_template
+        # CR: a rect centered on current coupler position, of same w/h as the coupler template.
         cr = coupler_template.rect.copy()
         cr.recenter_to(coupler.center.x, coupler.center.y)
-        srect = self.get_search_window(w, h, coupler_template)
 
-        sr = cr.copy()
-        sr.move_by(0, cr.h)
-        sr.scale_by(SEARCH_WIDTH_PCT, 1.0)
+        # SRect: The overall search window (from top of static coupler template to bottom of video)
+        # This /could/ be used to only process a sub-area of the original frame for speed purposes
+        # (right now it's only used for debug display reference, not for actual processing).
+        if self.compute_overlay:
+            srect = self.get_search_window(w, h, coupler_template)
+            self.draw_rect(srect, (255, 255, 0))
 
         if self.compute_overlay:
             # print(f"@@ [{frame_index:04d} {cr} center {cr.center()} // {sr} // {srect}]")
-            self.draw_rect(srect, (255, 255, 0))
             self.draw_rect(cr,    (255, 128, 0))
 
-        while sr.y+sr.h < h:
-            sr_lu = lu[sr.y : sr.y + sr.h, sr.x : sr.x + sr.w]
-            cv_lu = self.get_cv_vectorized(sr_lu)
-            # cv_lu = np.convolve(cv_lu, self.cv_smooth_kernel, mode="same")
-            cv_lu_inv = 1 - cv_lu
-            cv_lu_inv = cv_lu_inv ** 4
-            if self.compute_overlay:
-                self.draw_rect(sr,    (  0, 255, 0), width=1)
-                self.draw_curve(cv_lu_inv * sr.h, sr, (0, 255, 255))
-            sr.move_by(0, sr.h)
+        # Experiment 1: Use a few lines to run a CV computation, and display it.
+        self.experimental_cv_search(w, h, lu, cr)
 
         return frame
 
@@ -100,6 +94,25 @@ class RodDetector(ProcessorBase):
         elif y + h >= height:
             y = height - h
         return Rect(x, y, w, h)
+
+    def experimental_cv_search(self, w, h, lu, cr):
+        """Experiment 1: Use a few lines to run a CV computation, and display it."""
+
+        # SR: The actual search rect. It's located just below the coupler area (cr)
+        sr = cr.copy()
+        sr.move_by(0, cr.h)
+        sr.scale_by(SEARCH_WIDTH_PCT, 1.0)
+
+        while sr.y+sr.h < h:
+            sr_lu = lu[sr.y : sr.y + sr.h, sr.x : sr.x + sr.w]
+            cv_lu = self.get_cv_vectorized(sr_lu)
+            # cv_lu = np.convolve(cv_lu, self.cv_smooth_kernel, mode="same")
+            cv_lu_inv = 1 - cv_lu
+            cv_lu_inv = cv_lu_inv ** 4
+            if self.compute_overlay:
+                self.draw_rect(sr,    (  0, 255, 0), width=1)
+                self.draw_curve(cv_lu_inv * sr.h, sr, (0, 255, 255))
+            sr.move_by(0, sr.h)
 
     def get_cv_vectorized(self, strip):
         """
