@@ -7,6 +7,8 @@ from rect import Rect
 from process_coupler import ROI_WIDTH_PCT
 
 SEARCH_WIDTH_PCT = 3
+ROD_W_TOP = 15 / 1280
+ROD_W_BOT = 34 / 1280
 
 class RodDetector(ProcessorBase):
     def __init__(self, coupler_tracker):
@@ -20,6 +22,8 @@ class RodDetector(ProcessorBase):
 
     def init_size(self, width, height):
         super().init_size(width, height)
+        self.rod_w_top = int(ROD_W_TOP * width)
+        self.rod_w_bot = int(ROD_W_BOT * width)
 
     def init_overlay(self, frame):
         super().init_overlay(frame)
@@ -84,7 +88,7 @@ class RodDetector(ProcessorBase):
     def draw_threshold(self, y, rect, color, width=1):
         x1 = rect.x
         x2 = x1 + rect.w
-        y1 = rect.y + rect.h - y
+        y1 = rect.y + rect.h - int(y)
         cv2.line(self.overlay, (x1, y1), (x2, y1), color, width)
 
     def get_search_window(self, width, height, coupler_template):
@@ -156,39 +160,99 @@ class RodDetector(ProcessorBase):
         yt = sr.y
         yb = h
         y_half = (yt + yb) // 2
+        # we'll search for the rod close to the center at first.
+        # TBD: reuse data from the last frame as it should be "close by".
+        rod_center_x = (x1 + x2) // 2
+        rod_w = self.rod_w_top
 
         for y1 in range(yt, yb):
+            # the ideal rod width varies per line
+            ideal_rod_w = self.rod_w_top + (self.rod_w_bot - self.rod_w_top) / (yb - yt) * (y1 - yt)
+
             # for testing we just look at a single line (it's a 1,N 2d array though)
             y_lu = lu[y1 : y1 + 1, x1 : x2]
 
             # the Lua algorithm was manually computing the lu min/max and delta.
             # this is basically a normalization.
-            if y1 < y_half: # compare the 2 versions
-                # Option 1:
-                norm_y_lu = cv2.normalize(y_lu, None, alpha=0, beta=255, norm_type=cv2.NORM_MINMAX)
-            else:
-                # Option 2: use a percentile to avoid outlier black/white pixels
-                p2, p98 = np.percentile(y_lu, [2, 98])
-                # Clip values to the percentiles, then stretch
-                line_clipped = np.clip(y_lu, p2, p98)
-                norm_y_lu = cv2.normalize(line_clipped, None, 0, 255, cv2.NORM_MINMAX)
+            norm_y_lu = cv2.normalize(y_lu, None, alpha=0, beta=255, norm_type=cv2.NORM_MINMAX)
 
             # print(f"@@ [{y1}] sr_y_lu = {y_lu}")
             # print(f"@@ [{y1}] norm_y_lu = {norm_y_lu}")
             debug_y_lu = norm_y_lu
 
+            # Select everything that is higher than the 80th percentile.
+            flat = norm_y_lu.ravel()
+            f_threshold = np.percentile(flat, 80)
+            selected = (flat >= f_threshold).astype(np.uint8)
+
+            run_cw = self.select_best_run(selected, self.rod_w_top, self.rod_w_bot, rod_center_x - x1, ideal_rod_w)
+            if run_cw is not None:
+                rod_center_x = x1 + run_cw[0]
+                rod_w = run_cw[1]
+
             # debug
             if self.compute_overlay:
                 # we also place the values back into LU for display
                 lu[y1 : y1 + 1, x1 : x2] = debug_y_lu
+                # display current run
+                if run_cw is not None:
+                    color = (0, 0, 255)
+                    lx1 = int( rod_center_x - rod_w / 2)
+                    lx2 = int( rod_center_x + rod_w / 2)
+                    cv2.line(self.overlay, (lx1, y1), (lx2, y1), color, 1)
                 # display the curve at the bottom of the SR rect
                 if y1 == sr.y + sr.h - 1:
                     self.draw_rect(sr,    (  0, 255, 0), width=1)
                     # ravel() flattens 2d --> 1d
-                    flat = norm_y_lu.ravel() / 255 * sr.h
-                    self.draw_curve(flat, sr, (0, 255, 255))
-                    f_med = int(np.median(flat))
-                    self.draw_threshold(f_med, sr, (0, 165, 255)) # orange
+                    flat = norm_y_lu.ravel()
+                    self.draw_curve(flat / 255 * sr.h, sr, (0, 255, 255))
+                    self.draw_curve(selected * sr.h, sr, (255, 0, 0))
+                    self.draw_threshold(f_threshold / 255 * sr.h, sr, (0, 165, 255)) # orange
                     sr.move_by(0, sr.h)
+
+    def select_best_run(self, selected, min_size, max_size, rod_center_x, ideal_rod_w):
+        # Find transitions (0 to 1 and 1 to 0)
+        # Prepend/Append 0 to handle runs at the very start or end
+        padded = np.pad(selected, (1, 1), 'constant', constant_values=0)
+        diffs = np.diff(padded)
+
+        starts = np.where(diffs == 1)[0]
+        ends = np.where(diffs == 255)[0]    # -1 on an uint8 input array
+        lengths = ends - starts
+
+        # Identify which runs to keep
+        valid_indices = np.where((lengths >= min_size) & (lengths <= max_size))[0]
+        # print(f"@@ padded: {padded}")
+        # print(f"@@ diffs: {diffs}")
+        # print(f"@@ starts: {starts} -- ends {ends}")
+        # print(f"@@ lengths {lengths} --> valid {valid_indices}")
+
+        target_x1 = rod_center_x - ideal_rod_w / 2
+        target_x2 = rod_center_x + ideal_rod_w / 2
+        best_score = 0
+        selected_cw = None  # center + width
+
+        # Select the one that is the closest to the desired rod center
+        for idx in valid_indices:
+            x1 = starts[idx]
+            x2 = ends[idx]
+
+            # the score is the IoU of this segment vs the target
+            score = self.iou(x1, x2, target_x1, target_x2)
+            # print(f"@@ [{idx} of {len(valid_indices)}] x1 {x1} - {x2} vs target x1 {target_x1} - {target_x2} ---> score {score}")
+            if score > best_score:
+                best_score = score
+                selected_cw = ( (x1 + x2) / 2, (x2 - x1) )
+                # print(f"@@ [{idx} of {len(valid_indices)}] selected_cw = {selected_cw}")
+
+        return selected_cw
+
+
+    def iou(self, ax1, ax2, bx1, bx2):
+        """Computes IoU (Intersection over Union) between 2 segments A and B"""
+        intersection = max(0, min(ax2, bx2) - max(ax1, bx1))
+        union = (ax2 - ax1) + (bx2 - bx1) - intersection
+        return intersection / union if union > 0 else 0
+
 
 # ~~
