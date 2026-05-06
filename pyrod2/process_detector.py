@@ -8,7 +8,7 @@ from process_coupler import ROI_WIDTH_PCT
 
 SEARCH_WIDTH_PCT = 3
 ROD_W_TOP = 15 / 1280
-ROD_W_BOT = 34 / 1280
+ROD_W_BOT = 40 / 1280
 
 class RodDetector(ProcessorBase):
     def __init__(self, coupler_tracker):
@@ -58,7 +58,7 @@ class RodDetector(ProcessorBase):
         # self.experimental_cv_search(w, h, lu, cr)
 
         # Experiment 2: Re-implement the old Lua process
-        self.experimental_lua_search(w, h, lu, cr)
+        self.experimental_lua_search(frame_index, w, h, lu, cr)
 
         # For debug purposes, we display any changes made to the LU image.
         frame = cv2.cvtColor(lu, cv2.COLOR_GRAY2BGR)
@@ -147,7 +147,7 @@ class RodDetector(ProcessorBase):
 
         return cv_array
 
-    def experimental_lua_search(self, w, h, lu, cr):
+    def experimental_lua_search(self, frame_index, w, h, lu, cr):
         """Experiment 2: Reimplement the old pixel-based Lua search."""
 
         # SR: The actual search rect. It's located just below the coupler area (cr)
@@ -180,8 +180,19 @@ class RodDetector(ProcessorBase):
             # print(f"@@ [{y1}] norm_y_lu = {norm_y_lu}")
             debug_y_lu = norm_y_lu
 
+            # Experiment: work on the normalized or the original luminance?
+            # flat = norm_y_lu.ravel()      # it seems that doesn't make a ton of difference
+            flat = y_lu.ravel()
+
+            # Experiment -- this did not trigger anything useful
+            # # Check the quality of the line: does it have enough contrast?
+            # # Note: this test is useless when working on the normalized data since it MUST have 0..255 range.
+            # LUMA_CONTRAST = 20
+            # f_contrast = flat.max() - flat.min()
+            # skip_line = f_contrast < LUMA_CONTRAST
+            # print(f"@@ [{y1}] contrast: {f_contrast} = skip {skip_line}")
+
             # Select everything that is higher than the 80th percentile.
-            flat = norm_y_lu.ravel()
             f_threshold = np.percentile(flat, 80)
             selected = (flat >= f_threshold).astype(np.uint8)
 
@@ -189,6 +200,20 @@ class RodDetector(ProcessorBase):
             if run_cw is not None:
                 rod_center_x = x1 + run_cw[0]
                 rod_w = run_cw[1]
+                run_color = (0, 165, 255)
+
+                # Validate the quality of the line
+                mask = np.zeros_like(flat, dtype=np.uint8)
+                r1 = max(0, int(run_cw[0] - rod_w / 2))
+                r2 = min(len(flat), int(run_cw[0] + rod_w / 2))
+                mask[r1:r2] = 1
+                run_mean = flat[mask == 1].mean()
+                background_mean = flat[mask == 0].mean()
+                delta = int(run_mean - background_mean)
+                skip_line = delta < 30
+                print(f"@@ [{frame_index:04d} {y1:3d}] ({r1:3d} : {r2:3d}) separation: {delta:3d} = skip {skip_line}")
+                if skip_line:
+                    color = (0, 0, 255)
 
             # debug
             if self.compute_overlay:
@@ -196,10 +221,9 @@ class RodDetector(ProcessorBase):
                 lu[y1 : y1 + 1, x1 : x2] = debug_y_lu
                 # display current run
                 if run_cw is not None:
-                    color = (0, 0, 255)
                     lx1 = int( rod_center_x - rod_w / 2)
                     lx2 = int( rod_center_x + rod_w / 2)
-                    cv2.line(self.overlay, (lx1, y1), (lx2, y1), color, 1)
+                    cv2.line(self.overlay, (lx1, y1), (lx2, y1), run_color, 1)
                 # display the curve at the bottom of the SR rect
                 if y1 == sr.y + sr.h - 1:
                     self.draw_rect(sr,    (  0, 255, 0), width=1)
@@ -246,7 +270,6 @@ class RodDetector(ProcessorBase):
                 # print(f"@@ [{idx} of {len(valid_indices)}] selected_cw = {selected_cw}")
 
         return selected_cw
-
 
     def iou(self, ax1, ax2, bx1, bx2):
         """Computes IoU (Intersection over Union) between 2 segments A and B"""
