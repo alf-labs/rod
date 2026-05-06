@@ -51,7 +51,6 @@ class RodDetector(ProcessorBase):
             self.draw_rect(srect, (255, 255, 0))
 
         if self.compute_overlay:
-            # print(f"@@ [{frame_index:04d} {cr} center {cr.center()} // {sr} // {srect}]")
             self.draw_rect(cr,    (255, 128, 0))
 
         # Experiment 1: Use a few lines to run a CV computation, and display it.
@@ -166,59 +165,27 @@ class RodDetector(ProcessorBase):
         rod_w = self.rod_w_top
 
         for y1 in range(yt, yb):
-            # the ideal rod width varies per line
+            # The ideal rod width varies per line
             ideal_rod_w = self.rod_w_top + (self.rod_w_bot - self.rod_w_top) / (yb - yt) * (y1 - yt)
 
-            # for testing we just look at a single line (it's a 1,N 2d array though)
+            # For testing we just look at a single line (it's a 1,N 2d array though)
+            # Note: do not run cv2.normalize(0..255). It's idempotent with the percentile threshold below.
             y_lu = lu[y1 : y1 + 1, x1 : x2]
-
-            # the Lua algorithm was manually computing the lu min/max and delta.
-            # this is basically a normalization.
-            norm_y_lu = cv2.normalize(y_lu, None, alpha=0, beta=255, norm_type=cv2.NORM_MINMAX)
-
-            # print(f"@@ [{y1}] sr_y_lu = {y_lu}")
-            # print(f"@@ [{y1}] norm_y_lu = {norm_y_lu}")
-            debug_y_lu = norm_y_lu
-
-            # Experiment: work on the normalized or the original luminance?
-            # flat = norm_y_lu.ravel()      # it seems that doesn't make a ton of difference
+            # ravel() flattens 2d --> 1d
             flat = y_lu.ravel()
-
-            # Experiment -- this did not trigger anything useful
-            # # Check the quality of the line: does it have enough contrast?
-            # # Note: this test is useless when working on the normalized data since it MUST have 0..255 range.
-            # LUMA_CONTRAST = 20
-            # f_contrast = flat.max() - flat.min()
-            # skip_line = f_contrast < LUMA_CONTRAST
-            # print(f"@@ [{y1}] contrast: {f_contrast} = skip {skip_line}")
 
             # Select everything that is higher than the 80th percentile.
             f_threshold = np.percentile(flat, 80)
             selected = (flat >= f_threshold).astype(np.uint8)
-
             run_cw = self.select_best_run(selected, self.rod_w_top, self.rod_w_bot, rod_center_x - x1, ideal_rod_w)
+
             if run_cw is not None:
                 rod_center_x = x1 + run_cw[0]
                 rod_w = run_cw[1]
                 run_color = (0, 165, 255)
 
-                # Validate the quality of the line
-                mask = np.zeros_like(flat, dtype=np.uint8)
-                r1 = max(0, int(run_cw[0] - rod_w / 2))
-                r2 = min(len(flat), int(run_cw[0] + rod_w / 2))
-                mask[r1:r2] = 1
-                run_mean = flat[mask == 1].mean()
-                background_mean = flat[mask == 0].mean()
-                delta = int(run_mean - background_mean)
-                skip_line = delta < 30
-                print(f"@@ [{frame_index:04d} {y1:3d}] ({r1:3d} : {r2:3d}) separation: {delta:3d} = skip {skip_line}")
-                if skip_line:
-                    color = (0, 0, 255)
-
             # debug
             if self.compute_overlay:
-                # we also place the values back into LU for display
-                lu[y1 : y1 + 1, x1 : x2] = debug_y_lu
                 # display current run
                 if run_cw is not None:
                     lx1 = int( rod_center_x - rod_w / 2)
@@ -227,8 +194,6 @@ class RodDetector(ProcessorBase):
                 # display the curve at the bottom of the SR rect
                 if y1 == sr.y + sr.h - 1:
                     self.draw_rect(sr,    (  0, 255, 0), width=1)
-                    # ravel() flattens 2d --> 1d
-                    flat = norm_y_lu.ravel()
                     self.draw_curve(flat / 255 * sr.h, sr, (0, 255, 255))
                     self.draw_curve(selected * sr.h, sr, (255, 0, 0))
                     self.draw_threshold(f_threshold / 255 * sr.h, sr, (0, 165, 255)) # orange
@@ -246,10 +211,6 @@ class RodDetector(ProcessorBase):
 
         # Identify which runs to keep
         valid_indices = np.where((lengths >= min_size) & (lengths <= max_size))[0]
-        # print(f"@@ padded: {padded}")
-        # print(f"@@ diffs: {diffs}")
-        # print(f"@@ starts: {starts} -- ends {ends}")
-        # print(f"@@ lengths {lengths} --> valid {valid_indices}")
 
         target_x1 = rod_center_x - ideal_rod_w / 2
         target_x2 = rod_center_x + ideal_rod_w / 2
@@ -263,11 +224,9 @@ class RodDetector(ProcessorBase):
 
             # the score is the IoU of this segment vs the target
             score = self.iou(x1, x2, target_x1, target_x2)
-            # print(f"@@ [{idx} of {len(valid_indices)}] x1 {x1} - {x2} vs target x1 {target_x1} - {target_x2} ---> score {score}")
             if score > best_score:
                 best_score = score
                 selected_cw = ( (x1 + x2) / 2, (x2 - x1) )
-                # print(f"@@ [{idx} of {len(valid_indices)}] selected_cw = {selected_cw}")
 
         return selected_cw
 
