@@ -161,8 +161,9 @@ class RodDetector(ProcessorBase):
         y_half = (yt + yb) // 2
         # we'll search for the rod close to the center at first.
         # TBD: reuse data from the last frame as it should be "close by".
-        rod_center_x = (x1 + x2) // 2
-        rod_w = self.rod_w_top
+        ideal_rod_w = self.rod_w_top
+        rod_center = (x1 + x2) // 2
+        rod_bounds = ( int(rod_center - ideal_rod_w / 2), int(rod_center + ideal_rod_w / 2) )
 
         for y1 in range(yt, yb):
             # The ideal rod width varies per line
@@ -170,52 +171,52 @@ class RodDetector(ProcessorBase):
 
             # For testing we just look at a single line (it's a 1,N 2d array though)
             # Note: do not run cv2.normalize(0..255). It's idempotent with the percentile threshold below.
-            y_lu = lu[y1 : y1 + 1, x1 : x2]
-            # ravel() flattens 2d --> 1d
-            flat = y_lu.ravel()
+            y_lu_u8 = lu[y1, x1 : x2]
 
             # Select everything that is higher than the 80th percentile.
-            f_threshold = np.percentile(flat, 80)
-            selected = (flat >= f_threshold).astype(np.uint8)
-            run_cw = self.select_best_run(selected, self.rod_w_top, self.rod_w_bot, rod_center_x - x1, ideal_rod_w)
+            f_threshold = np.percentile(y_lu_u8, 80)
+            selected_01 = (y_lu_u8 >= f_threshold).astype(np.uint8)
+            run_bounds = self.select_best_run(selected_01, self.rod_w_top, self.rod_w_bot, rod_center - x1, ideal_rod_w)
 
-            if run_cw is not None:
-                rod_center_x = x1 + run_cw[0]
-                rod_w = run_cw[1]
-                run_color = (0, 165, 255)
+            if run_bounds is not None:
+                rod_bounds = ( run_bounds[0] + x1, run_bounds[1] + x1 )
+                rod_center = ( rod_bounds[0] + rod_bounds[1] ) // 2
 
             # debug
             if self.compute_overlay:
                 # display current run
-                if run_cw is not None:
-                    lx1 = int( rod_center_x - rod_w / 2)
-                    lx2 = int( rod_center_x + rod_w / 2)
+                if run_bounds is not None:
+                    run_color = (0, 165, 255)
+                    lx1 = rod_bounds[0]
+                    lx2 = rod_bounds[1]
                     cv2.line(self.overlay, (lx1, y1), (lx2, y1), run_color, 1)
                 # display the curve at the bottom of the SR rect
                 if y1 == sr.y + sr.h - 1:
                     self.draw_rect(sr,    (  0, 255, 0), width=1)
-                    self.draw_curve(flat / 255 * sr.h, sr, (0, 255, 255))
-                    self.draw_curve(selected * sr.h, sr, (255, 0, 0))
+                    self.draw_curve(y_lu_u8 / 255 * sr.h, sr, (0, 255, 255))
+                    self.draw_curve(selected_01 * sr.h, sr, (255, 0, 0))
                     self.draw_threshold(f_threshold / 255 * sr.h, sr, (0, 165, 255)) # orange
                     sr.move_by(0, sr.h)
 
-    def select_best_run(self, selected, min_size, max_size, rod_center_x, ideal_rod_w):
+    def select_best_run(self, selected_01, min_size, max_size, rod_center, ideal_rod_w):
+        # Return run_bounds(x1: int, x2: int) or None
+
         # Find transitions (0 to 1 and 1 to 0)
         # Prepend/Append 0 to handle runs at the very start or end
-        padded = np.pad(selected, (1, 1), 'constant', constant_values=0)
-        diffs = np.diff(padded)
-
-        starts = np.where(diffs == 1)[0]
-        ends = np.where(diffs == 255)[0]    # -1 on an uint8 input array
+        padded_u8 = np.pad(selected_01, (1, 1), "constant", constant_values=0)
+        diffs_u8 = np.diff(padded_u8)
+        # diff computes 0->1 = 1 or 1->0 = 255 (-1 on an uint8 buffer)
+        starts = np.where(diffs_u8 == 1)[0]
+        ends = np.where(diffs_u8 == 255)[0]
         lengths = ends - starts
 
         # Identify which runs to keep
         valid_indices = np.where((lengths >= min_size) & (lengths <= max_size))[0]
 
-        target_x1 = rod_center_x - ideal_rod_w / 2
-        target_x2 = rod_center_x + ideal_rod_w / 2
+        target_x1 = rod_center - ideal_rod_w / 2
+        target_x2 = rod_center + ideal_rod_w / 2
         best_score = 0
-        selected_cw = None  # center + width
+        selected_bounds = None  # ( x1, x2 )
 
         # Select the one that is the closest to the desired rod center
         for idx in valid_indices:
@@ -226,9 +227,9 @@ class RodDetector(ProcessorBase):
             score = self.iou(x1, x2, target_x1, target_x2)
             if score > best_score:
                 best_score = score
-                selected_cw = ( (x1 + x2) / 2, (x2 - x1) )
+                selected_bounds = ( int(x1), int(x2) )
 
-        return selected_cw
+        return selected_bounds
 
     def iou(self, ax1, ax2, bx1, bx2):
         """Computes IoU (Intersection over Union) between 2 segments A and B"""
