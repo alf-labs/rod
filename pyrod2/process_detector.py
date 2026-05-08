@@ -5,6 +5,7 @@ from processor import ProcessorBase
 from point import Point
 from rect import Rect
 from process_coupler import ROI_WIDTH_PCT, QUALITY_THRESHOLD
+from rod_result import RodResult
 
 SEARCH_WIDTH_PCT = 3
 ROD_W_TOP = 15 / 1280
@@ -19,6 +20,7 @@ class RodDetector(ProcessorBase):
         self.couplers = coupler_tracker.couplers
         self.current_template = None
         self.current_search_rect = None
+        self.rods = {}
 
     def init_size(self, width, height):
         super().init_size(width, height)
@@ -163,7 +165,8 @@ class RodDetector(ProcessorBase):
         # we'll search for the rod close to the center at first.
         # TBD: reuse data from the last frame as it should be "close by".
         ideal_rod_w = self.rod_w_top
-        rod_center = (x1 + x2) // 2
+        initial_rod_center = (x1 + x2) // 2
+        rod_center = initial_rod_center
         # rod_bounds is (0=y, 1=xcenter, 2=width, 3=xleft, 4=xright). Remove later what we don't need.
         rod_bounds = ( yt, rod_center, ideal_rod_w, int(rod_center - ideal_rod_w / 2), int(rod_center + ideal_rod_w / 2) )
 
@@ -220,6 +223,13 @@ class RodDetector(ProcessorBase):
         poly_c = np.polynomial.Polynomial.fit(np_y, np_c, deg=2)    # 2 or 3?
         poly_w = np.polynomial.Polynomial.fit(np_y, np_w, deg=1)    # 1 or 2?
 
+        self.rods[frame_index] = RodResult(
+            frame_index,
+            initial_rod_center,
+            yt, yb,
+            poly_c, poly_w,
+        )
+
         if self.compute_overlay:
             run_color = (0, 165, 255)
             for y1 in range(yt, yb):
@@ -268,6 +278,13 @@ class RodDetector(ProcessorBase):
         intersection = max(0, min(ax2, bx2) - max(ax1, bx1))
         union = (ax2 - ax1) + (bx2 - bx1) - intersection
         return intersection / union if union > 0 else 0
+
+    def export(self):
+        print(f"@@ RodDetector export")
+        rods =  [ v.to_json() for k, v in self.rods.items() ]
+        return {
+            "poly_rods": rods,
+        }
 
 
 # ~~

@@ -35,4 +35,4 @@ class CouplerResult:
         )
 
     def __repr__(self):
-        return f"CouplerResult( [{self.frame_index:.3f}] {self.center}, qual {self.quality:.3f}, ref {self.coupler_ref:4d} )"
+        return f"CouplerResult( [{self.frame_index:04d}] {self.center}, qual {self.quality:.3f}, ref {self.coupler_ref:4d} )"
