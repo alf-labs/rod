@@ -316,9 +316,11 @@ class Main:
 
             if not args.coupler_only:
                 # Processor #1
-                self.processors.append( RodDetector(
-                    tracker
-                ))
+                detector = RodDetector(tracker)
+                self.processors.append( detector )
+                if self.coupler_path:
+                    detector.read_json(self.export_content)
+
             #     self.processors.append( Detector(processor,
             #         inpainting=None if args.detector_preview else args.inpaint,
             #         rod_dilate_px=args.rod_dilate_px,

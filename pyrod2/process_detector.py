@@ -56,14 +56,27 @@ class RodDetector(ProcessorBase):
         if self.compute_overlay:
             self.draw_rect(cr,    (255, 128, 0))
 
-        # Experiment 1: Use a few lines to run a CV computation, and display it.
-        # self.experimental_cv_search(w, h, lu, cr)
+        has_result = frame_index in self.rods
 
-        # Experiment 2: Re-implement the old Lua process
-        self.experimental_lua_search(frame_index, w, h, lu, cr)
+        if not has_result:
+            result = self.search_poly_rod(frame_index, w, h, lu, cr)
+            self.rods[frame_index] = result
+        else:
+            # Reuse previous result
+            result = self.rods[frame_index]
+            # print(f"@@ [{frame_index:04d}] Reuse ROD {result}")
 
-        # For debug purposes, we display any changes made to the LU image.
-        frame = cv2.cvtColor(lu, cv2.COLOR_GRAY2BGR)
+        if self.compute_overlay and result is not None:
+            run_color = (0, 165, 255)
+            for y1 in range(result.y_top, result.y_bottom):
+                lc = result.poly_c(y1)
+                lw = result.poly_w(y1)
+                lx1 = int(lc - lw / 2)
+                lx2 = int(lc + lw / 2)
+                cv2.line(self.overlay, (lx1, y1), (lx2, y1), run_color, 1)
+
+        # # For debug purposes, we display any changes made to the LU image.
+        # frame = cv2.cvtColor(lu, cv2.COLOR_GRAY2BGR)
         return frame
 
     def draw_rect(self, rect, color, width=2):
@@ -111,46 +124,8 @@ class RodDetector(ProcessorBase):
             y = height - h
         return Rect(x, y, w, h)
 
-    def experimental_cv_search(self, w, h, lu, cr):
-        """Experiment 1: Use a few lines to run a CV computation, and display it."""
-
-        # SR: The actual search rect. It's located just below the coupler area (cr)
-        sr = cr.copy()
-        sr.move_by(0, cr.h)
-        sr.scale_by(SEARCH_WIDTH_PCT, 1.0)
-
-        while sr.y+sr.h < h:
-            sr_lu = lu[sr.y : sr.y + sr.h, sr.x : sr.x + sr.w]
-            cv_lu = self.get_cv_vectorized(sr_lu)
-            # cv_lu = np.convolve(cv_lu, self.cv_smooth_kernel, mode="same")
-            cv_lu_inv = 1 - cv_lu
-            cv_lu_inv = cv_lu_inv ** 4
-            if self.compute_overlay:
-                self.draw_rect(sr,    (  0, 255, 0), width=1)
-                self.draw_curve(cv_lu_inv * sr.h, sr, (0, 255, 255))
-            sr.move_by(0, sr.h)
-
-    def get_cv_vectorized(self, strip):
-        """
-        Coefficient of Variation (CV)
-        Calculates CV for all columns in a strip simultaneously.
-        'strip' should be a (self.num_bottom_rows_cv, width) array.
-        """
-        # Convert to float32 for math
-        data = strip.astype(np.float32)
-
-        # Calculate mean and std across the vertical axis (axis 0)
-        means = np.mean(data, axis=0)
-        stds = np.std(data, axis=0)
-
-        # Avoid division by zero: where mean is 0, CV is 0
-        # Using np.divide with 'where' condition handles this cleanly
-        cv_array = np.divide(stds, means, out=np.zeros_like(stds), where=means > 0)
-
-        return cv_array
-
-    def experimental_lua_search(self, frame_index, w, h, lu, cr):
-        """Experiment 2: Reimplement the old pixel-based Lua search."""
+    def search_poly_rod(self, frame_index, w, h, lu, cr):
+        """Experiment 2: Reimplement the old pixel-based Lua search but with a numpy take."""
 
         # SR: The actual search rect. It's located just below the coupler area (cr)
         sr = cr.copy()
@@ -208,7 +183,7 @@ class RodDetector(ProcessorBase):
                     sr.move_by(0, sr.h)
 
         if len(all_bounds) < 2:
-            return
+            return None
 
         # x1s = [r[3] for r in all_bounds]
         # x2s = [r[4] for r in all_bounds]
@@ -217,28 +192,19 @@ class RodDetector(ProcessorBase):
         # print(f"@@ [{frame_index:04d}] max1:{dx1:3d}, {dx1 / (yb - yt)}")
         # print(f"@@ [{frame_index:04d}] max2:{dx2:3d}, {dx2 / (yb - yt)}")
 
+        # TBD: replace all_bounds array by 3 arrays for y/c/w.
         np_y = np.array( [ r[0] for r in all_bounds ] )
         np_c = np.array( [ r[1] for r in all_bounds ] )
         np_w = np.array( [ r[2] for r in all_bounds ] )
         poly_c = np.polynomial.Polynomial.fit(np_y, np_c, deg=2)    # 2 or 3?
         poly_w = np.polynomial.Polynomial.fit(np_y, np_w, deg=1)    # 1 or 2?
 
-        self.rods[frame_index] = RodResult(
+        return RodResult(
             frame_index,
             initial_rod_center,
             yt, yb,
             poly_c, poly_w,
         )
-
-        if self.compute_overlay:
-            run_color = (0, 165, 255)
-            for y1 in range(yt, yb):
-                lc = poly_c(y1)
-                lw = poly_w(y1)
-                lx1 = int(lc - lw / 2)
-                lx2 = int(lc + lw / 2)
-                cv2.line(self.overlay, (lx1, y1), (lx2, y1), run_color, 1)
-
 
     def select_best_run(self, selected_01, min_size, max_size, rod_center, ideal_rod_w):
         # Return run_bounds(x1: int, x2: int) or None
@@ -286,5 +252,22 @@ class RodDetector(ProcessorBase):
             "poly_rods": rods,
         }
 
+    def read_json(self, data):
+        if "poly_rods" in data:
+            rods = [RodResult.from_json(r) for r in data["poly_rods"]]
+            rods.sort(key=lambda r: r.frame_index)
+            for r in rods:
+                self.rods[r.frame_index] = r
+            print(f"@@ RodDetector imported {len(rods)} rod results")
+        self.fix_rod_movement()
+
+    def pre_release(self):
+        self.fix_rod_movement()
+        super().pre_release()
+
+    def fix_rod_movement(self):
+        if not self.rods:
+            return
+        pass
 
 # ~~

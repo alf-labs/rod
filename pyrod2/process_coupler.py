@@ -158,6 +158,7 @@ class CouplerTracker(ProcessorBase):
             for t in data["coupler_templates"]:
                 template = CouplerTemplate.from_json(t)
                 self.tracker_templates[template.frame_index] = template
+            print(f"@@ CouplerTracker imported {len(self.tracker_templates)} coupler templates")
             if self.current_template is None and self.tracker_templates:
                 indices = sorted(self.tracker_templates.keys())
                 idx = bisect.bisect_right(indices, self.start_frame)
@@ -170,6 +171,7 @@ class CouplerTracker(ProcessorBase):
             couplers.sort(key=lambda c: c.frame_index)
             for c in couplers:
                 self.couplers[c.frame_index] = c
+            print(f"@@ CouplerTracker imported {len(couplers)} coupler results")
         self.fix_coupler_movement()
 
     def pre_release(self):
@@ -272,7 +274,7 @@ class CouplerTracker(ProcessorBase):
         full_window = 2 * window_size + 1
         views = np.lib.stride_tricks.sliding_window_view(x, full_window)
 
-        # Calculate local medians and MADs
+        # Calculate local medians and MADs (Median Absolute Deviations)
         local_medians = np.median(views, axis=1)
         local_mads = k * np.median(np.abs(views - local_medians[:, None]), axis=1)
 
@@ -291,32 +293,29 @@ class CouplerTracker(ProcessorBase):
         return new_x
 
     def fix_missing_frames(self):
-        # 1. Convert your list of objects to NumPy arrays
-        # Assuming your object is a dictionary or has attributes
         frames_existing = np.array([c.frame_index for c in self.couplers.values()])
         x_existing = np.array([c.center.x for c in self.couplers.values()])
         y_existing = np.array([c.center.y for c in self.couplers.values()])
 
-        # 2. Define the full range of frames you want (e.g., from first to last)
+        # Full range of frames from first to last
         all_frames = np.arange(frames_existing.min(), frames_existing.max() + 1)
 
-        # 3. Find which frames are actually missing
+        # Find which frames are actually missing
         missing_mask = np.isin(all_frames, frames_existing, invert=True)
         missing_frames = all_frames[missing_mask]
         print(f"@@ {len(missing_frames)} missing frames to interpolate")
 
-        # 4. Use np.interp to find the X and Y for all missing frames at once
-        # np.interp(target_x, known_x, known_y)
+        # Use np.interp to find the X and Y for all missing frames at once
+        # Syntax is np.interp(target_x, known_x, known_y)
         interp_x = np.interp(missing_frames, frames_existing, x_existing)
         interp_y = np.interp(missing_frames, frames_existing, y_existing)
-
-        # 5. Pack them back into your object format
 
         # Build a list, similar to bisect_right mapping all misisng frames numbers to the
         # rightmost existing frame index. That's really an insertion index which we convert
         # below to a frame_index number.
         insertion_indices = np.searchsorted(frames_existing, missing_frames, side='right')
 
+        # Use zip to read all the input arrays at the same time (they have the same length)
         for ins, f, x, y in zip(insertion_indices, missing_frames, interp_x, interp_y):
             previous_f_idx = frames_existing[ins - 1] if ins > 0 else frames_existing[0]
             previous_f = self.couplers[previous_f_idx]
@@ -332,4 +331,5 @@ class CouplerTracker(ProcessorBase):
             print(f"@@ INTERP [{previous_f_idx:04d}] -> {self.couplers[f]}")
 
         # Finally sort the dictionary by key to maintain a consistent frame ordering
+        # (Python dicts are ordered so new keys were added at the end, we need them in key order)
         self.couplers = dict(sorted(self.couplers.items()))

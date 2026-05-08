@@ -1,4 +1,6 @@
+import numpy as np
 from point import Point
+
 
 class RodResult:
     def __init__(self, frame_index, initial_center, y_top, y_bottom, poly_c, poly_w):
@@ -52,7 +54,7 @@ class RodResult:
 
     @staticmethod
     def poly_from_json(json):
-        return Polynomial(
+        return np.polynomial.Polynomial(
             coef   = json["c"],
             domain = json["d"],
             window = json["w"]
