@@ -4,7 +4,7 @@ import numpy as np
 from processor import ProcessorBase
 from point import Point
 from rect import Rect
-from process_coupler import ROI_WIDTH_PCT
+from process_coupler import ROI_WIDTH_PCT, QUALITY_THRESHOLD
 
 SEARCH_WIDTH_PCT = 3
 ROD_W_TOP = 15 / 1280
@@ -34,8 +34,9 @@ class RodDetector(ProcessorBase):
         lu = lab[:, :, 0]
 
         coupler = self.couplers[frame_index]
-        if coupler is None:
+        if coupler is None or coupler.quality < QUALITY_THRESHOLD:
             return frame
+
         if self.current_template is None:
             self.current_template = self.tracker_templates[coupler.coupler_ref]
         coupler_template = self.current_template
@@ -163,8 +164,10 @@ class RodDetector(ProcessorBase):
         # TBD: reuse data from the last frame as it should be "close by".
         ideal_rod_w = self.rod_w_top
         rod_center = (x1 + x2) // 2
-        rod_bounds = ( int(rod_center - ideal_rod_w / 2), int(rod_center + ideal_rod_w / 2) )
+        # rod_bounds is (0=y, 1=xcenter, 2=width, 3=xleft, 4=xright). Remove later what we don't need.
+        rod_bounds = ( yt, rod_center, ideal_rod_w, int(rod_center - ideal_rod_w / 2), int(rod_center + ideal_rod_w / 2) )
 
+        all_bounds = []
         for y1 in range(yt, yb):
             # The ideal rod width varies per line
             ideal_rod_w = self.rod_w_top + (self.rod_w_bot - self.rod_w_top) / (yb - yt) * (y1 - yt)
@@ -179,17 +182,20 @@ class RodDetector(ProcessorBase):
             run_bounds = self.select_best_run(selected_01, self.rod_w_top, self.rod_w_bot, rod_center - x1, ideal_rod_w)
 
             if run_bounds is not None:
-                rod_bounds = ( run_bounds[0] + x1, run_bounds[1] + x1 )
-                rod_center = ( rod_bounds[0] + rod_bounds[1] ) // 2
+                run_x1 = run_bounds[0] + x1
+                run_x2 = run_bounds[1] + x1
+                rod_center = ( run_x1 + run_x2 ) // 2
+                rod_bounds = ( y1, rod_center, run_x2 - run_x1, run_x1, run_x2 )
+                all_bounds.append(rod_bounds)
 
             # debug
             if self.compute_overlay:
                 # display current run
-                if run_bounds is not None:
-                    run_color = (0, 165, 255)
-                    lx1 = rod_bounds[0]
-                    lx2 = rod_bounds[1]
-                    cv2.line(self.overlay, (lx1, y1), (lx2, y1), run_color, 1)
+                # if run_bounds is not None:
+                #     run_color = (0, 165, 255)
+                #     lx1 = rod_bounds[3]
+                #     lx2 = rod_bounds[4]
+                #     cv2.line(self.overlay, (lx1, y1), (lx2, y1), run_color, 1)
                 # display the curve at the bottom of the SR rect
                 if y1 == sr.y + sr.h - 1:
                     self.draw_rect(sr,    (  0, 255, 0), width=1)
@@ -197,6 +203,32 @@ class RodDetector(ProcessorBase):
                     self.draw_curve(selected_01 * sr.h, sr, (255, 0, 0))
                     self.draw_threshold(f_threshold / 255 * sr.h, sr, (0, 165, 255)) # orange
                     sr.move_by(0, sr.h)
+
+        if len(all_bounds) < 2:
+            return
+
+        # x1s = [r[3] for r in all_bounds]
+        # x2s = [r[4] for r in all_bounds]
+        # dx1 = max(x1s) - min(x1s)
+        # dx2 = max(x2s) - min(x2s)
+        # print(f"@@ [{frame_index:04d}] max1:{dx1:3d}, {dx1 / (yb - yt)}")
+        # print(f"@@ [{frame_index:04d}] max2:{dx2:3d}, {dx2 / (yb - yt)}")
+
+        np_y = np.array( [ r[0] for r in all_bounds ] )
+        np_c = np.array( [ r[1] for r in all_bounds ] )
+        np_w = np.array( [ r[2] for r in all_bounds ] )
+        poly_c = np.polynomial.Polynomial.fit(np_y, np_c, deg=2)    # 2 or 3?
+        poly_w = np.polynomial.Polynomial.fit(np_y, np_w, deg=1)    # 1 or 2?
+
+        if self.compute_overlay:
+            run_color = (0, 165, 255)
+            for y1 in range(yt, yb):
+                lc = poly_c(y1)
+                lw = poly_w(y1)
+                lx1 = int(lc - lw / 2)
+                lx2 = int(lc + lw / 2)
+                cv2.line(self.overlay, (lx1, y1), (lx2, y1), run_color, 1)
+
 
     def select_best_run(self, selected_01, min_size, max_size, rod_center, ideal_rod_w):
         # Return run_bounds(x1: int, x2: int) or None
@@ -216,7 +248,7 @@ class RodDetector(ProcessorBase):
         target_x1 = rod_center - ideal_rod_w / 2
         target_x2 = rod_center + ideal_rod_w / 2
         best_score = 0
-        selected_bounds = None  # ( x1, x2 )
+        selected_bounds = None  # None or ( x1, x2 )
 
         # Select the one that is the closest to the desired rod center
         for idx in valid_indices:
