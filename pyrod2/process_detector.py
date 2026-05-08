@@ -21,6 +21,7 @@ class RodDetector(ProcessorBase):
         self.current_template = None
         self.current_search_rect = None
         self.rods = {}
+        self.rods_fixed = False
 
     def init_size(self, width, height):
         super().init_size(width, height)
@@ -61,6 +62,7 @@ class RodDetector(ProcessorBase):
         if not has_result:
             result = self.search_poly_rod(frame_index, w, h, lu, cr)
             self.rods[frame_index] = result
+            self.rods_fixed = False
         else:
             # Reuse previous result
             result = self.rods[frame_index]
@@ -68,12 +70,17 @@ class RodDetector(ProcessorBase):
 
         if self.compute_overlay and result is not None:
             run_color = (0, 165, 255)
+            first_lc = None
+            last_lc = None
             for y1 in range(result.y_top, result.y_bottom):
                 lc = result.poly_c(y1)
+                if first_lc is None: first_lc = lc
+                last_lc = lc
                 lw = result.poly_w(y1)
                 lx1 = int(lc - lw / 2)
                 lx2 = int(lc + lw / 2)
                 cv2.line(self.overlay, (lx1, y1), (lx2, y1), run_color, 1)
+            # print(f"@@ DEBUG [{frame_index:04d} LC {first_lc:.3f} -> {last_lc:.3f}]")
 
         # # For debug purposes, we display any changes made to the LU image.
         # frame = cv2.cvtColor(lu, cv2.COLOR_GRAY2BGR)
@@ -268,6 +275,65 @@ class RodDetector(ProcessorBase):
     def fix_rod_movement(self):
         if not self.rods:
             return
-        pass
+        if self.rods_fixed:
+            return
+        self.rods_fixed = True
+        # last_top = None
+        # last_frame = None
+        # ts = []
+        # bs = []
+
+        c2 = np.array( [ abs(r.poly_c.coef[2]) for _, r in self.rods.items() ] )
+        c2_abs = np.median( c2 )
+        threshold = 2.25 * c2_abs
+
+        remove_frames = []
+
+        for frame, rod in self.rods.items():
+            c2 = rod.poly_c.coef[2]
+            is_bent = abs(c2) > threshold
+            if is_bent:
+                remove_frames.append(frame)
+                print(f"@@ [{frame:04d}] REMOVE {c2:.4f} > {threshold:.4f} --- {'THRESHOLD' if is_bent else '-'}")
+
+            # x2.append(c2)
+            # print(f"@@ [{frame:04d}] {c2:.4f} ==> {score1:.4f} vs {score2:.4f} vs {score3:.4f} --- {'THRESHOLD' if is_bent else '-'}")
+            # y_top = rod.y_top
+            # y_bot = rod.y_bottom
+            # y_mid = (y_top + y_bot) / 2
+
+            # x_top = rod.poly_c(y_top)
+            # x_mid = rod.poly_c(y_mid)
+            # x_bot = rod.poly_c(y_bot)
+
+
+
+            # if last_top is not None:
+            #     dx_top = (x_top - last_top)
+            #     dx_bot = (x_bot - x_top)
+            #     print(f"@@ [{frame:04d}] {x_top:.1f} x {rod.y_top:03d} > {x_bot:.1f} x {rod.y_bottom:03d} -- DX Top: {dx_top:.3f}, Bot: {dx_bot:.3f}")
+            #     ts.append(dx_top)
+            #     bs.append(dx_bot)
+
+            # last_top = x_top
+            # last_frame = frame
+
+        # Remove frames in place in the rods dictionary
+        for frame in remove_frames:
+            self.rods.pop(frame, None)
+        print(f"@@ Removed {len(remove_frames)} bent rods; {len(self.rods)} rods left.")
+
+        # print(f"@@ COEF 2 MEDIAN Global {c2_med:.3f}, abs {c2_abs:.3f}, abs corrected {abs_med:.3f} -- thresold {threshold:.3f}")
+
+        # x2s = np.array( x2 )
+        # a2s = np.abs( x2s )
+        # print(f"@@ COEF 2 MIN T {np.min(x2s):.3f}, MEDIAN {np.median(x2s):.3f}, MAX {np.max(x2s):.3f}")
+        # print(f"@@ COEF 2 MIN T {np.min(a2s):.3f}, MEDIAN {np.median(a2s):.3f}, MAX {np.max(a2s):.3f}")
+
+        # ts = np.array( ts )
+        # bs = np.array( bs )
+        # print(f"@@ MIN T {np.min(ts):.3f}, B {np.min(bs):.3f}")
+        # print(f"@@ MAX T {np.max(ts):.3f}, B {np.max(bs):.3f}")
+        # print(f"@@ MED T {np.median(ts):.3f}, B {np.median(bs):.3f}")
 
 # ~~
