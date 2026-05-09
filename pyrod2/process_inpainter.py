@@ -8,8 +8,8 @@ from process_coupler import ROI_WIDTH_PCT, QUALITY_THRESHOLD
 # ROI_WIDTH_MULTIPLIER = 5 # x rod_width_px
 # ROI_HEIGHT = 400/720
 ROD_BLUR_PY = 11/720
-ROD_DILATE_PX = 3
-ROD_BLUR_PX = 3
+ROD_DILATE_PX = 21
+ROD_BLUR_PX = 11
 
 class ProcessInpainter(ProcessorBase):
     def __init__(self, coupler_tracker, rod_detector, inpainting="left", rod_dilate_px=ROD_DILATE_PX, rod_blur_px=ROD_BLUR_PX):
@@ -132,37 +132,37 @@ class ProcessInpainter(ProcessorBase):
 
     #     return flood_mask[1:-1, 1:-1] * 255
 
-    # def draw_mask_heatmap(self, mask, roi_x_left):
-    #     height, width = mask.shape
-    #     overlay_view = self.overlay[-height:, roi_x_left:roi_x_left + width]
-    #     # overlay_view[mask >    1] = (0, 255, 255)
-    #     # overlay_view[mask >  128] = (0, 128, 255)
-    #     # overlay_view[mask == 255] = (0,   0, 255)
-    #     # Fill the overlay with (0, mask, 255)
-    #     heatmap = overlay_view.copy()
-    #     heatmap[:, :, 0] = 0
-    #     heatmap[:, :, 1] = mask
-    #     heatmap[:, :, 2] = 255
-    #     overlay_view[mask > 0] = heatmap[mask > 0]
+    def draw_mask_heatmap(self, mask_u8, roi_rect):
+        h, w = mask_u8.shape
+        overlay_view = self.overlay[roi_rect.y : roi_rect.y + h, roi_rect.x : roi_rect.x + w]
+        # overlay_view[mask_u8 >    1] = (0, 255, 255)
+        # overlay_view[mask_u8 >  128] = (0, 128, 255)
+        # overlay_view[mask_u8 == 255] = (0,   0, 255)
+        # Fill the overlay with (0, mask_u8, 255)
+        heatmap = overlay_view.copy()
+        heatmap[:, :, 0] = 0
+        heatmap[:, :, 1] = mask_u8
+        heatmap[:, :, 2] = 255
+        overlay_view[mask_u8 > 0] = heatmap[mask_u8 > 0]
 
-    # def draw_mask_outline(self, mask_u8, roi_x_left):
-    #     h, w = mask_u8.shape
-    #     overlay_view = self.overlay[-h:, roi_x_left:roi_x_left + w]
+    def draw_mask_outline(self, mask_u8, roi_rect):
+        h, w = mask_u8.shape
+        overlay_view = self.overlay[roi_rect.y : roi_rect.y + h, roi_rect.x : roi_rect.x + w]
 
-    #     rows = np.arange(h)     # all rows as indices [0...h-1]
+        rows = np.arange(h)     # all rows as indices [0...h-1]
 
-    #     # argmax returns the index of the FIRST True value it encounters
-    #     # axis=1 means to accross axis 1 (which is W in the H,W order)
-    #     start0 = np.argmax(mask_u8 > 0, axis=1)
-    #     start2 = np.argmax(mask_u8 == 255, axis=1)
-    #     flip_u8 = mask_u8[:, ::-1]  # step -1 mirrors on W axis
-    #     end0 = (w - 1) - np.argmax(flip_u8 > 0, axis=1)
-    #     end2 = (w - 1) - np.argmax(flip_u8 == 255, axis=1)
+        # argmax returns the index of the FIRST True value it encounters
+        # axis=1 means to accross axis 1 (which is W in the H,W order)
+        start0 = np.argmax(mask_u8 > 0, axis=1)
+        start2 = np.argmax(mask_u8 == 255, axis=1)
+        flip_u8 = mask_u8[:, ::-1]  # step -1 mirrors on W axis
+        end0 = (w - 1) - np.argmax(flip_u8 > 0, axis=1)
+        end2 = (w - 1) - np.argmax(flip_u8 == 255, axis=1)
 
-    #     overlay_view[rows, start0] = (0, 255, 255)
-    #     overlay_view[rows, start2] = (0,   0, 255)
-    #     overlay_view[rows, end2  ] = (0,   0, 255)
-    #     overlay_view[rows, end0  ] = (0, 255, 255)
+        overlay_view[rows, start0] = (0, 255, 255)
+        overlay_view[rows, start2] = (0,   0, 255)
+        overlay_view[rows, end2  ] = (0,   0, 255)
+        overlay_view[rows, end0  ] = (0, 255, 255)
 
     # def draw_mask_line(self, mask_u8, roi_x_left, y_mask):
     #     _, w = mask_u8.shape
@@ -191,24 +191,27 @@ class ProcessInpainter(ProcessorBase):
         return wide_roi_rgb
 
     def update_rod_h_top(self, y):
-        if self.rod_h_top is None:
-            self.rod_h_top = int(y)
-        else:
-            self.rod_h_top = int(self.weight(self.rod_h_top, y, 0.1))
+        pass
+    #     if self.rod_h_top is None:
+    #         self.rod_h_top = int(y)
+    #     else:
+    #         self.rod_h_top = int(self.weight(self.rod_h_top, y, 0.1))
 
-    def inpaint_manual_left(self, wide_roi_rgb, blur_mask_u8, mask_transform=None):
-        h, w, _ = wide_roi_rgb.shape
+    def inpaint_manual_left(self, roi_rgb, blur_mask_u8, mask_transform=None):
+        h, w, _ = roi_rgb.shape
 
-        if self.rod_h_top is None or self.rod_blur_py == 0:
-            y_blur_0 = 0
-            y_blur_1 = 0
-        else:
-            y_blur_1 = self.rod_h_top
-            y_blur_0 = y_blur_1 + self.rod_blur_py
+        y_blur_0 = 0
+        y_blur_1 = 0
+        # if self.rod_h_top is None or self.rod_blur_py == 0:
+        #     y_blur_0 = 0
+        #     y_blur_1 = 0
+        # else:
+        #     y_blur_1 = self.rod_h_top
+        #     y_blur_0 = y_blur_1 + self.rod_blur_py
 
         for y in range(h-1, 0, -1):
             blur_row = blur_mask_u8[y, :]
-            rgb_row = wide_roi_rgb[y, :]
+            rgb_row = roi_rgb[y, :]
 
             index255 = np.where(blur_row == 255)[0]
             if len(index255) == 0:
@@ -256,21 +259,23 @@ class ProcessInpainter(ProcessorBase):
                 ) // 255
             rgb_row[left2 : right0] = blended.astype(np.uint8)
 
-        return wide_roi_rgb
+        return roi_rgb
 
-    def inpaint_manual_right(self, wide_roi_rgb, blur_mask_u8, mask_transform=None):
-        h, w, _ = wide_roi_rgb.shape
+    def inpaint_manual_right(self, roi_rgb, blur_mask_u8, mask_transform=None):
+        h, w, _ = roi_rgb.shape
 
-        if self.rod_h_top is None or self.rod_blur_py == 0:
-            y_blur_0 = 0
-            y_blur_1 = 0
-        else:
-            y_blur_1 = self.rod_h_top
-            y_blur_0 = y_blur_1 + self.rod_blur_py
+        y_blur_0 = 0
+        y_blur_1 = 0
+        # if self.rod_h_top is None or self.rod_blur_py == 0:
+        #     y_blur_0 = 0
+        #     y_blur_1 = 0
+        # else:
+        #     y_blur_1 = self.rod_h_top
+        #     y_blur_0 = y_blur_1 + self.rod_blur_py
 
         for y in range(h-1, 0, -1):
             blur_row = blur_mask_u8[y, :]
-            rgb_row = wide_roi_rgb[y, :]
+            rgb_row = roi_rgb[y, :]
 
             index255 = np.where(blur_row == 255)[0]
             if len(index255) == 0:
@@ -318,7 +323,7 @@ class ProcessInpainter(ProcessorBase):
                 ) // 255
             rgb_row[left0 : right2] = blended.astype(np.uint8)
 
-        return wide_roi_rgb
+        return roi_rgb
 
     def inpaint_manual_mix(self, wide_roi_rgb, blur_mask_u8):
         # "mix" means we do mirror from the left *and* the right, and then average:
@@ -365,48 +370,41 @@ class ProcessInpainter(ProcessorBase):
         cr = coupler_template.rect.copy()
         cr.recenter_to(coupler.center.x, coupler.center.y)
 
-        # SRect: The overall search window (from top of static coupler template to bottom of video)
-        # This /could/ be used to only process a sub-area of the original frame for speed purposes
-        # (right now it's only used for debug display reference, not for actual processing).
-        if self.compute_overlay:
-            srect = self.get_search_window(w, h, coupler_template)
-            self.draw_rect(srect, (255, 255, 0))
+        # The overall ROI window (from top of static coupler template to bottom of video)
+        roi_rect = self.get_search_window(w, h, coupler_template)
+        ry1 = roi_rect.y
+        ry2 = ry1 + roi_rect.h
+        rx1 = roi_rect.x
+        rx2 = rx1 + roi_rect.w
 
-        if self.compute_overlay and rod is not None:
-            self.draw_rod(rod, (0, 255, 255), width=1)
-
-        return frame
-
-        # -- Phase 2
-        # Starting form here, the ROI becomes the entire width of the image
-        # and the bottom ROI height rows.
-        wide_w = self.width
-        wide_mask_u8 = np.zeros((roi_height, wide_w), np.uint8)
-        wide_mask_u8[:, roi_x_left:roi_x_left + self.roi_width] = mask_u8
-
-        wide_roi_rgb = frame[-roi_height:, :]
+        roi_rgb = frame[ry1 : ry2, rx1 : rx2]
+        roi_mask_u8 = np.zeros((roi_rect.h, roi_rect.w), np.uint8)
+        for y1 in range(rod.y_top, rod.y_bottom):
+            lc = rod.poly_c(y1)
+            lw = rod.poly_w(y1)
+            lx1 = int(lc - lw / 2 - rx1)
+            lx2 = int(lc + lw / 2 - rx1)
+            ly  = y1 - ry1
+            roi_mask_u8[ly, lx1 : lx2] = 255
 
         # Original: Dilate by (1, h_dilate_width), blur by (h_dilate_width, 1)
         # Experiment: Dilate by (1, h_dilate_width), blur by (h_dilate_width, 1)
-        wide_mask_u8 = cv2.dilate(wide_mask_u8, self.rod_dilate_kernel, iterations=1)
-        blur_mask_u8 = cv2.GaussianBlur(wide_mask_u8, self.rod_blur_ksize, 0)
+        roi_mask_u8 = cv2.dilate(roi_mask_u8, self.rod_dilate_kernel, iterations=1)
+        blur_mask_u8 = cv2.GaussianBlur(roi_mask_u8, self.rod_blur_ksize, 0)
 
         if self.view_mask and self.compute_overlay:
-            self.draw_mask_heatmap(blur_mask_u8, 0)
+            self.draw_mask_heatmap(blur_mask_u8, roi_rect)
             # self.draw_mask_outline(blur_mask_u8, 0)
             # self.draw_mask_line(blur_mask_u8, 0, -10)
 
         if self.inpaint_method:
-            inpainted = self.inpaint_method(wide_roi_rgb, blur_mask_u8)
-            frame[-roi_height:, :] = inpainted
+            inpainted = self.inpaint_method(roi_rgb, blur_mask_u8)
+            frame[ry1 : ry2, rx1 : rx2] = inpainted
 
         if self.view_mask and self.compute_overlay:
-            self.draw_roi_bounds(roi_x_left, rod_x_ctr)
+            self.draw_rect(roi_rect, (255, 255, 0))
 
-        if self.view_mask:
-            return cv2.cvtColor(lu, cv2.COLOR_GRAY2BGR)
-        else:
-            return frame
+        return frame
 
     def get_search_window(self, width, height, coupler_template):
         template_rect = coupler_template.rect.copy()
