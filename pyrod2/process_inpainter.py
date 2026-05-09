@@ -154,7 +154,7 @@ class ProcessInpainter(ProcessorBase):
         return self._inpaint_poly_left_right(roi_rect, roi_rgb, rod, self._right_merge)
 
     def inpaint_poly_mix(self, roi_rect, roi_rgb, rod):
-        return self._inpaint_poly_left_right(roi_rect, roi_rgb, rod, self._both_merge)
+        return self._inpaint_poly_left_right(roi_rect, roi_rgb, rod, self._mixed_merge)
 
     def _inpaint_poly_left_right(self, roi_rect, roi_rgb, rod, method):
         ry1 = roi_rect.y
@@ -251,3 +251,47 @@ class ProcessInpainter(ProcessorBase):
                 + src_row_u16 * blend_u16[:   , np.newaxis]
             ) / 256
         rgb_row[x0 : x1] = blended.astype(np.uint8)
+
+    def _mixed_merge(self, lc, lw, ly, roi_rgb):
+        # X values:
+        # x0 --> blend (w0) --> x1 (left) --> full (w1) --> x2 (right) --> blend (w2) --> x3
+        # Left  algorithm: no blend on left (x0..x1), blend on the right (x2..x3)
+        # Right algorithm: blend on the left (x0..x1), no blend on right (x2..x3), only
+        x1 = int(lc - lw / 2) - ROD_DILATE_PX
+        x2 = int(lc + lw / 2) + ROD_DILATE_PX
+        x0 = x1 - ROD_BLUR_PX
+        x3 = x2 + ROD_BLUR_PX
+        w0 = x1 - x0
+        w1 = x2 - x1
+        w2 = x3 - x2
+
+        # We need to copy the source in order to not read what we just overwrote
+        rgb_row = roi_rgb[ly, :].copy()
+
+        # Part 1: copy X1-X2 mirrored around X2 as-is, no blend.
+        src_row1 = rgb_row[x1 : x1 - w1 : -1, :].astype(np.uint16)
+        src_row2 = rgb_row[x2 + w1 : x2 : -1, :].astype(np.uint16)
+        blended = (src_row1 + src_row2) // 2
+        roi_rgb[ly, x1 : x2] = blended.astype(np.uint8)
+
+        # Part 2: blend X2-X3 mirrored around X1.
+        src_row_u16 = rgb_row[x1 - w1 : x1 - w1 - w2 : -1, :].astype(np.uint16)
+        dst_row_u16 = rgb_row[x2 : x3].astype(np.uint16)
+        blend_u16 = self.rod_blend_x_u16
+        # print(f"@@ x1 {x1} > x2 {x2} + {w2} > x3 {x3} -- coef {coef} -- rgb {rgb_row.shape}, src {src_row_u16.shape}, dst {dst_row_u16.shape}, blend {blend_u16.shape}")
+        blended = (
+                  dst_row_u16 * blend_u16[:   , np.newaxis]
+                + src_row_u16 * blend_u16[::-1, np.newaxis]
+            ) // 256
+        roi_rgb[ly, x2 : x3] = blended.astype(np.uint8)
+
+        # Part 2: blend X0-X1 mirrored around X2.
+        src_row_u16 = rgb_row[x2 + w1 + w0 : x2 + w1 : -1, :].astype(np.uint16)
+        dst_row_u16 = rgb_row[x0 : x1].astype(np.uint16)
+        blend_u16 = self.rod_blend_x_u16
+        # print(f"@@ x1 {x1} > x2 {x2} + {w2} > x3 {x3} -- coef {coef} -- rgb {rgb_row.shape}, src {src_row_u16.shape}, dst {dst_row_u16.shape}, blend {blend_u16.shape}")
+        blended = (
+                  dst_row_u16 * blend_u16[::-1, np.newaxis]
+                + src_row_u16 * blend_u16[:   , np.newaxis]
+            ) // 256
+        roi_rgb[ly, x0 : x1] = blended.astype(np.uint8)
