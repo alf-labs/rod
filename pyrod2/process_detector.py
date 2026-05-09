@@ -266,24 +266,28 @@ class RodDetector(ProcessorBase):
             for r in rods:
                 self.rods[r.frame_index] = r
             print(f"@@ RodDetector imported {len(rods)} rod results")
-        self.fix_rod_movement()
+        self.fix_rods()
 
     def pre_release(self):
-        self.fix_rod_movement()
+        self.fix_rods()
         super().pre_release()
 
-    def fix_rod_movement(self):
+    def fix_rods(self):
         if not self.rods:
             return
         if self.rods_fixed:
             return
+        self.fix_bent_rods()
+        self.fix_missing_rods()
+
+    def fix_bent_rods(self):
         self.rods_fixed = True
         # last_top = None
         # last_frame = None
         # ts = []
         # bs = []
 
-        c2 = np.array( [ abs(r.poly_c.coef[2]) for _, r in self.rods.items() ] )
+        c2 = np.array( [ abs(r.poly_c.coef[2]) for r in self.rods.values() ] )
         c2_abs = np.median( c2 )
         threshold = 2.25 * c2_abs
 
@@ -335,5 +339,62 @@ class RodDetector(ProcessorBase):
         # print(f"@@ MIN T {np.min(ts):.3f}, B {np.min(bs):.3f}")
         # print(f"@@ MAX T {np.max(ts):.3f}, B {np.max(bs):.3f}")
         # print(f"@@ MED T {np.median(ts):.3f}, B {np.median(bs):.3f}")
+
+    def fix_missing_rods(self):
+        if not self.rods:
+            return
+
+        # frames_existing = np.array([r.frame_index for r in self.rods.values()])
+        # # Full range of frames from first to last
+        # all_frames = np.arange(frames_existing.min(), frames_existing.max() + 1)
+        # # Find which frames are actually missing
+        # missing_mask = np.isin(all_frames, frames_existing, invert=True)
+        # missing_frames = all_frames[missing_mask]
+        # print(f"@@ {len(missing_frames)} missing frames to interpolate: {missing_frames}")
+
+        frames_existing = np.sort(np.array([r.frame_index for r in self.rods.values()]))
+        # Find where the gap between consecutive frames is > 1
+        diffs = np.diff(frames_existing)
+        gap_indices = np.where(diffs > 1)[0]
+
+        for idx in gap_indices:
+            left_frame = frames_existing[idx]
+            right_frame = frames_existing[idx + 1]
+
+            poly_at_left = self.rods[left_frame].poly_c
+            poly_at_right = self.rods[right_frame].poly_c
+
+            # These are the indices you need to fill
+            missing_range = np.arange(left_frame + 1, right_frame)
+
+            # Total distance for calculating 't' (0.0 to 1.0)
+            gap_width = right_frame - left_frame
+
+            print(f"Interpolating from {left_frame} to {right_frame}")
+
+            for f_idx in missing_range:
+                # Calculate t: how far are we into the gap?
+                t = (f_idx - left_frame) / gap_width
+
+                # Now you can use your poly interpolation logic:
+                new_poly = self.interpolate_polys(poly_at_left, poly_at_right, t)
+                # ... save new_poly for f_idx ...
+                print(f"@@ INTERP: Left [{left_frame:04d}] {poly_at_left}, Right [{right_frame:04d}] {poly_at_right}, {t}, ==> {new_poly}")
+
+    def interpolate_polys(self, poly_a, poly_b, t):
+        """
+        t: 0.0 is poly_a, 1.0 is poly_b
+        """
+        # Convert both to standard form to ensure coefficients
+        # are in the same 'pixel' units
+        pa_std = poly_a.convert(domain=poly_a.domain)
+        pb_std = poly_b.convert(domain=poly_a.domain) # Match domains
+
+        # 2. Linear interpolation of coefficients
+        # (1-t)*A + t*B
+        new_coef = (1 - t) * pa_std.coef + t * pb_std.coef
+
+        # 3. Return a new Polynomial
+        return np.polynomial.Polynomial(new_coef, domain=poly_a.domain)
 
 # ~~
