@@ -42,7 +42,7 @@ class RodResult:
         )
 
     def __repr__(self):
-        return f"RodResult( [{self.frame_index:04d}] Y {self.y_top}-{self.y_bottom}, center {self.initial_center}, {self.poly_c}, W {self.poly_w} )"
+        return f"RodResult( [{self.frame_index:04d}] Y {self.y_top}-{self.y_bottom}, center {self.initial_center}, {RodResult.poly_to_json(self.poly_c)}, W {RodResult.poly_to_json(self.poly_w)} )"
 
     @staticmethod
     def poly_to_json(poly):

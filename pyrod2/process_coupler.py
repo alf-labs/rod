@@ -328,7 +328,7 @@ class CouplerTracker(ProcessorBase):
                 quality = 0,  # remember it was a missing frame of low quality
                 coupler_ref = previous_f.coupler_ref,
             )
-            print(f"@@ INTERP [{previous_f_idx:04d}] -> {self.couplers[f]}")
+            print(f"@@ Interp Coupler [{previous_f_idx:04d}] -> {self.couplers[f]}")
 
         # Finally sort the dictionary by key to maintain a consistent frame ordering
         # (Python dicts are ordered so new keys were added at the end, we need them in key order)

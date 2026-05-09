@@ -207,10 +207,12 @@ class RodDetector(ProcessorBase):
         poly_w = np.polynomial.Polynomial.fit(np_y, np_w, deg=1)    # 1 or 2?
 
         return RodResult(
-            frame_index,
-            initial_rod_center,
-            yt, yb,
-            poly_c, poly_w,
+            frame_index=frame_index,
+            initial_center=initial_rod_center,
+            y_top=yt,
+            y_bottom=yb,
+            poly_c=poly_c,
+            poly_w=poly_w,
         )
 
     def select_best_run(self, selected_01, min_size, max_size, rod_center, ideal_rod_w):
@@ -352,34 +354,62 @@ class RodDetector(ProcessorBase):
         # missing_frames = all_frames[missing_mask]
         # print(f"@@ {len(missing_frames)} missing frames to interpolate: {missing_frames}")
 
-        frames_existing = np.sort(np.array([r.frame_index for r in self.rods.values()]))
+        frames_existing = np.sort(np.array( [ r.frame_index for r in self.rods.values() ] ))
         # Find where the gap between consecutive frames is > 1
         diffs = np.diff(frames_existing)
         gap_indices = np.where(diffs > 1)[0]
 
         for idx in gap_indices:
-            left_frame = frames_existing[idx]
-            right_frame = frames_existing[idx + 1]
+            frame1 = frames_existing[idx]
+            frame2 = frames_existing[idx + 1]
 
-            poly_at_left = self.rods[left_frame].poly_c
-            poly_at_right = self.rods[right_frame].poly_c
+            rod1 = self.rods[frame1]
+            rod2 = self.rods[frame2]
+            # print(f"@@ INTERP 1: Left  [{frame1:04d}] {repr(rod1)}")
+            # print(f"@@ INTERP 1: Right [{frame2:04d}] {repr(rod2)}")
 
             # These are the indices you need to fill
-            missing_range = np.arange(left_frame + 1, right_frame)
+            missing_range = np.arange(frame1 + 1, frame2)
 
             # Total distance for calculating 't' (0.0 to 1.0)
-            gap_width = right_frame - left_frame
+            num_frames = frame2 - frame1
 
-            print(f"Interpolating from {left_frame} to {right_frame}")
+            ic1 = rod1.initial_center
+            yt1 = rod1.y_top
+            yb1 = rod1.y_bottom
+            ic1_range = rod2.initial_center - ic1
+            yt1_range = rod2.y_top - yt1
+            yb1_range = rod2.y_bottom - yb1
 
-            for f_idx in missing_range:
+            print(f"@@ Interpolating from {frame1} to {frame2}")
+
+            for frame in missing_range:
                 # Calculate t: how far are we into the gap?
-                t = (f_idx - left_frame) / gap_width
+                t = (frame - frame1) / num_frames
 
-                # Now you can use your poly interpolation logic:
-                new_poly = self.interpolate_polys(poly_at_left, poly_at_right, t)
+                ic = int(ic1 + t * ic1_range)
+                yt = int(yt1 + t * yt1_range)
+                yb = int(yb1 + t * yb1_range)
+
+                result = RodResult(
+                    frame_index=int(frame),
+                    initial_center=ic,
+                    y_top=yt,
+                    y_bottom=yb,
+                    poly_c=self.interpolate_polys(rod1.poly_c, rod2.poly_c, t),
+                    poly_w=self.interpolate_polys(rod1.poly_w, rod2.poly_w, t),
+                )
+
+                self.rods[frame] = result
+                print(f"@@ Interp Rod [{frame:04d}] {t:.3f} -> {result}")
+
                 # ... save new_poly for f_idx ...
-                print(f"@@ INTERP: Left [{left_frame:04d}] {poly_at_left}, Right [{right_frame:04d}] {poly_at_right}, {t}, ==> {new_poly}")
+                # print(f"@@ INTERP 2: Left [{left_frame:04d}] {poly_at_left}, Right [{right_frame:04d}] {poly_at_right}, {t}, ==> {new_poly}")
+                # print(f"@@ INTERP 2:  [{frame:04d}]   {t}, ==> {RodResult.poly_to_json(new_poly)}")
+
+        # Finally sort the dictionary by key to maintain a consistent frame ordering
+        # (Python dicts are ordered so new keys were added at the end, we need them in key order)
+        self.rods = dict(sorted(self.rods.items()))
 
     def interpolate_polys(self, poly_a, poly_b, t):
         """
