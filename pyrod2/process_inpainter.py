@@ -7,7 +7,7 @@ from process_coupler import ROI_WIDTH_PCT, QUALITY_THRESHOLD
 
 # ROI_WIDTH_MULTIPLIER = 5 # x rod_width_px
 # ROI_HEIGHT = 400/720
-ROD_BLUR_PY = 11/720
+ROD_BLUR_PY = 40/720
 ROD_DILATE_PX = 21
 ROD_BLUR_PX = 11
 
@@ -30,13 +30,14 @@ class ProcessInpainter(ProcessorBase):
         }.get(inpainting, None)
         self.rod_dilate_kernel = np.ones((3, rod_dilate_px), np.uint8)
         self.rod_blur_ksize = (rod_blur_px, 3)
+        self.rod_h_top = None
         print(f"@@ Inpainter method: {self.inpaint_method}")
 
     def init_size(self, width, height):
         super().init_size(width, height)
         print(f"@@ Inpainter init_size")
-        # self.rod_blur_py = int(ROD_BLUR_PY * height)
-        # print(f"Inpainter: Rod {self.rod_width_px} px")
+        self.rod_blur_py = int(ROD_BLUR_PY * height)
+        print(f"Inpainter: Rod blur height {self.rod_blur_py} px")
 
     def init_overlay(self, frame):
         super().init_overlay(frame)
@@ -65,18 +66,18 @@ class ProcessInpainter(ProcessorBase):
     #         color=(0, 255, 0),
     #         thickness=-1)
 
-    # def weight(self, a, b, weight_a=0.75):
-    #     return a * weight_a + b * (1 - weight_a)
+    def weight(self, a, b, weight_a=0.75):
+        return a * weight_a + b * (1 - weight_a)
 
-    # def smoothstep(self, x):
-    #     """x is expected in range 0..1 as float"""
-    #     # https://en.wikipedia.org/wiki/Smoothstep
-    #     if x < 0:
-    #         return 0
-    #     elif x >= 1:
-    #         return 1
-    #     else:
-    #         return x * x * (3.0 - 2.0 * x)
+    def smoothstep(self, x):
+        """x is expected in range 0..1 as float"""
+        # https://en.wikipedia.org/wiki/Smoothstep
+        if x < 0:
+            return 0
+        elif x >= 1:
+            return 1
+        else:
+            return x * x * (3.0 - 2.0 * x)
 
     # def find_rod_by_threshold(self, roi_lu, tracked_x, tracked_y):
     #     # Try a basic binary mask
@@ -192,23 +193,22 @@ class ProcessInpainter(ProcessorBase):
         return wide_roi_rgb
 
     def update_rod_h_top(self, y):
-        pass
-    #     if self.rod_h_top is None:
-    #         self.rod_h_top = int(y)
-    #     else:
-    #         self.rod_h_top = int(self.weight(self.rod_h_top, y, 0.1))
+        if self.rod_h_top is None:
+            self.rod_h_top = int(y)
+        else:
+            self.rod_h_top = int(self.weight(self.rod_h_top, y, 0.1))
 
     def inpaint_manual_left(self, roi_rgb, blur_mask_u8, mask_transform=None):
         h, w, _ = roi_rgb.shape
 
-        y_blur_0 = 0
-        y_blur_1 = 0
-        # if self.rod_h_top is None or self.rod_blur_py == 0:
-        #     y_blur_0 = 0
-        #     y_blur_1 = 0
-        # else:
-        #     y_blur_1 = self.rod_h_top
-        #     y_blur_0 = y_blur_1 + self.rod_blur_py
+        # y_blur_0 = 0
+        # y_blur_1 = 0
+        if self.rod_h_top is None or self.rod_blur_py == 0:
+            y_blur_0 = 0
+            y_blur_1 = 0
+        else:
+            y_blur_1 = self.rod_h_top
+            y_blur_0 = y_blur_1 + self.rod_blur_py
 
         for y in range(h-1, 0, -1):
             blur_row = blur_mask_u8[y, :]
@@ -366,6 +366,8 @@ class ProcessInpainter(ProcessorBase):
 
         if self.current_template is None:
             self.current_template = self.coupler_tracker.tracker_templates[coupler.coupler_ref]
+            print(f"@@ Tracker size: {self.current_template.rect}")
+            self.rod_blur_py = min(self.rod_blur_py, self.current_template.rect.h)
         coupler_template = self.current_template
         # CR: a rect centered on current coupler position, of same w/h as the coupler template.
         cr = coupler_template.rect.copy()
@@ -380,7 +382,8 @@ class ProcessInpainter(ProcessorBase):
 
         roi_rgb = frame[ry1 : ry2, rx1 : rx2]
         roi_mask_u8 = np.zeros((roi_rect.h, roi_rect.w), np.uint8)
-        for y1 in range(rod.y_top, rod.y_bottom):
+        ry_top = rod.y_top - self.rod_blur_py
+        for y1 in range(ry_top, ry2):
             lc = rod.poly_c(y1)
             lw = rod.poly_w(y1)
             lx1 = int(lc - lw / 2 - rx1)
