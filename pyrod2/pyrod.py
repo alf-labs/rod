@@ -21,8 +21,8 @@ try:
     import scipy
     from flask import Flask, render_template, Response, request, jsonify
     from process_coupler import CouplerTracker
-    from process_detector import RodDetector #, ROD_DILATE_PX, ROD_BLUR_PX
-    from process_inpainter import ProcessInpainter
+    from process_detector import RodDetector
+    from process_inpainter import ProcessInpainter, ROD_DILATE_PX, ROD_BLUR_PX
 except ModuleNotFoundError as e:
     print(f"ERROR: Missing library. {e}")
     print( "To fix: $ pip install opencv-python numpy scipy imutils flask")
@@ -97,11 +97,11 @@ class Main:
 
         # parser.add_argument("-0", "--locator-only", action="store_true", help="Only run locator process")
         # parser.add_argument(      "--locator-rod-sz", default="50,30,75,/1280", help="Locator Rod size/min/max")
-        parser.add_argument("-1", "--detector-preview", action="store_true", help="Run detector in preview (no inpaint)")
+        # parser.add_argument("-1", "--detector-preview", action="store_true", help="Run in preview (no inpaint)")
 
-        # parser.add_argument("-p", "--inpaint", default="left", choices=["left", "right", "mix", "telea", "navier", "none"], help="Inpaint algorithm")
-        # parser.add_argument(      "--rod-dilate-px", type=int, default=ROD_DILATE_PX, help="Dilate filter kernel after rod detection")
-        # parser.add_argument(      "--rod-blur-px", type=int, default=ROD_BLUR_PX, help="Blur filter kernel after rod detection")
+        parser.add_argument("-p", "--inpaint", default="left", choices=["left", "right", "mix", "telea", "navier", "none"], help="Inpaint algorithm")
+        parser.add_argument(      "--rod-dilate-px", type=int, default=ROD_DILATE_PX, help="Dilate filter kernel after rod detection")
+        parser.add_argument(      "--rod-blur-px", type=int, default=ROD_BLUR_PX, help="Blur filter kernel after rod detection")
         args = parser.parse_args()
         self.args = args
 
@@ -323,13 +323,14 @@ class Main:
                     detector.read_json(self.export_content)
 
                 # Processor #2
-                inpainter = ProcessInpainter(tracker, detector)
+                inpainter = ProcessInpainter(
+                    tracker,
+                    detector,
+                    inpainting=args.inpaint,
+                    rod_dilate_px=args.rod_dilate_px,
+                    rod_blur_px=args.rod_blur_px,
+                )
                 self.processors.append( inpainter )
-
-            #     self.processors.append( Detector(processor,
-            #         inpainting=None if args.detector_preview else args.inpaint,
-            #         rod_dilate_px=args.rod_dilate_px,
-            #         rod_blur_px=args.rod_blur_px) )
 
             for p in self.processors:
                 p.compute_overlay = self.compute_overlay

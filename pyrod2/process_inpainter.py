@@ -30,6 +30,7 @@ class ProcessInpainter(ProcessorBase):
         }.get(inpainting, None)
         self.rod_dilate_kernel = np.ones((3, rod_dilate_px), np.uint8)
         self.rod_blur_ksize = (rod_blur_px, 3)
+        print(f"@@ Inpainter method: {self.inpaint_method}")
 
     def init_size(self, width, height):
         super().init_size(width, height)
