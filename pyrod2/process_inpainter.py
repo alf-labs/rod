@@ -21,11 +21,9 @@ class ProcessInpainter(ProcessorBase):
         self.current_template = None
         self.view_mask = inpainting is None
         self.inpaint_method = {
-            "left":   self.inpaint_manual_left,
-            "right":  self.inpaint_manual_right,
-            "mix":    self.inpaint_manual_mix,
-            "telea":  self.inpaint_telea,
-            "navier": self.inpaint_navier,
+            "left":   self.inpaint_poly_left,
+            "right":  self.inpaint_poly_left,
+            "mix":    self.inpaint_poly_left,
             "none":   self.inpaint_noop,
         }.get(inpainting, None)
         self.rod_dilate_kernel = np.ones((3, rod_dilate_px), np.uint8)
@@ -38,6 +36,9 @@ class ProcessInpainter(ProcessorBase):
         print(f"@@ Inpainter init_size")
         self.rod_blur_py = int(ROD_BLUR_PY * height)
         print(f"Inpainter: Rod blur height {self.rod_blur_py} px")
+        # Use a smoothstep transition blend
+        xs = np.arange(ROD_BLUR_PX) / ROD_BLUR_PX
+        self.rod_blend_x_u16 = (xs * xs * (3.0 - 2.0 * xs) * 256).astype(np.uint16)
 
     def init_overlay(self, frame):
         super().init_overlay(frame)
@@ -72,6 +73,9 @@ class ProcessInpainter(ProcessorBase):
     def smoothstep(self, x):
         """x is expected in range 0..1 as float"""
         # https://en.wikipedia.org/wiki/Smoothstep
+        # Note: in the [0..1] range, smoothstep[1-x] = 1-smoothstep[x]
+        # meaning to "reverse" the curve for blending, we can either
+        # use "1-s(x)" or "s(1-x)".
         if x < 0:
             return 0
         elif x >= 1:
@@ -493,19 +497,33 @@ class ProcessInpainter(ProcessorBase):
             lw = rod.poly_w(y1)
 
             # X values:
-            # x0 --> blur (w0) --> x1 (left) --> full (w1) -> x2 (right)
+            # x0 --> blend (w0) --> x1 (left) --> full (w1) --> x2 (right) --> blend (w2) --> x3
+            # Left  algorithm: no blend on left (x0..x1), blend on the right (x2..x3)
+            # Right algorithm: blend on the left (x0..x1), no blend on right (x2..x3), only
             x1 = int(lc - lw / 2) - ROD_DILATE_PX
             x2 = int(lc + lw / 2) + ROD_DILATE_PX
             x0 = x1 - ROD_BLUR_PX
+            x3 = x2 + ROD_BLUR_PX
             w0 = x1 - x0
             w1 = x2 - x1
+            w2 = x3 - x2
 
             ly  = y1 - ry1
             rgb_row = roi_rgb[ly, :]
 
-            # Version A: copy X1-X2 mirrored around X1 as-is, no blur.
+            # Part 1: copy X1-X2 mirrored around X1 as-is, no blend.
             src_row = rgb_row[x1 : x1 - w1 : -1, :]
             rgb_row[x1 : x2] = src_row[:]
+
+            # Part 2: blend X2-X3 mirrored around X1.
+            src_row_u16 = rgb_row[x1 - w1 : x1 - w1 - w2 : -1, :].astype(np.uint16)
+            dst_row_u16 = rgb_row[x2 : x3].astype(np.uint16)
+            blend_u16 = self.rod_blend_x_u16
+            blended = (
+                      dst_row_u16 * blend_u16[:   , np.newaxis]
+                    + src_row_u16 * blend_u16[::-1, np.newaxis]
+                ) / 256
+            rgb_row[x2 : x3] = blended.astype(np.uint8)
 
         return roi_rgb
 

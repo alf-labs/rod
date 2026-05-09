@@ -93,13 +93,13 @@ class Main:
         parser.add_argument(      "--no-json", action="store_true", help="Skip JSON Export")
 
         parser.add_argument("-0", "--coupler-only", action="store_true", help="Only run top-coupler location process")
-        parser.add_argument(      "--coupler-json", default="", help="Top-coupler JSON data to read back")
+        parser.add_argument(      "--load-json", default="", help="JSON data to read back")
 
         # parser.add_argument("-0", "--locator-only", action="store_true", help="Only run locator process")
         # parser.add_argument(      "--locator-rod-sz", default="50,30,75,/1280", help="Locator Rod size/min/max")
         # parser.add_argument("-1", "--detector-preview", action="store_true", help="Run in preview (no inpaint)")
 
-        parser.add_argument("-p", "--inpaint", default="left", choices=["left", "right", "mix", "telea", "navier", "none"], help="Inpaint algorithm")
+        parser.add_argument("-p", "--inpaint", default="left", choices=["left", "right", "mix", "none"], help="Inpaint algorithm")
         parser.add_argument(      "--rod-dilate-px", type=int, default=ROD_DILATE_PX, help="Dilate filter kernel after rod detection")
         parser.add_argument(      "--rod-blur-px", type=int, default=ROD_BLUR_PX, help="Blur filter kernel after rod detection")
         args = parser.parse_args()
@@ -113,9 +113,9 @@ class Main:
             input_idx = int(self.input_path)
             self.input_path = IN_VIDEOS[input_idx % len(IN_VIDEOS)]
 
-        if args.coupler_json:
-            self.coupler_path = args.coupler_json
-            path_name = re.sub(r"(\D+).*", r"\1", os.path.basename(args.coupler_json)) # stop at first digit
+        if args.load_json:
+            self.coupler_path = args.load_json
+            path_name = re.sub(r"(\D+).*", r"\1", os.path.basename(args.load_json)) # stop at first digit
 
         self.output_path = f"{args.output}".replace("NAME", path_name)
         self.output_path = self.output_path.replace("IDX", str(input_idx))
