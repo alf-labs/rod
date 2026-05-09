@@ -8,7 +8,7 @@ from process_coupler import ROI_WIDTH_PCT, QUALITY_THRESHOLD
 # ROI_WIDTH_MULTIPLIER = 5 # x rod_width_px
 # ROI_HEIGHT = 400/720
 ROD_BLUR_PY = 40/720
-ROD_DILATE_PX = 21
+ROD_DILATE_PX = 5
 ROD_BLUR_PX = 11
 
 class ProcessInpainter(ProcessorBase):
@@ -402,11 +402,14 @@ class ProcessInpainter(ProcessorBase):
             # self.draw_mask_line(blur_mask_u8, 0, -10)
 
         if self.inpaint_method:
-            inpainted = self.inpaint_method(roi_rgb, blur_mask_u8)
+            # inpainted = self.inpaint_method(roi_rgb, blur_mask_u8)
+            inpainted = self.inpaint_poly_left(roi_rect, roi_rgb, rod)
             frame[ry1 : ry2, rx1 : rx2] = inpainted
 
         if self.view_mask and self.compute_overlay:
+            self.draw_rect(cr,       (255, 128, 0))
             self.draw_rect(roi_rect, (255, 255, 0))
+            self.draw_rod (roi_rect, rod)
 
         return frame
 
@@ -428,13 +431,13 @@ class ProcessInpainter(ProcessorBase):
             y = height - h
         return Rect(x, y, w, h)
 
-    def draw_rod(self, rod_result, color, width=1):
-        for y1 in range(rod_result.y_top, rod_result.y_bottom):
-            lc = rod_result.poly_c(y1)
-            lw = rod_result.poly_w(y1)
-            lx1 = int(lc - lw / 2)
-            lx2 = int(lc + lw / 2)
-            cv2.line(self.overlay, (lx1, y1), (lx2, y1), color, width)
+    # def draw_rod(self, rod_result, color, width=1):
+    #     for y1 in range(rod_result.y_top, rod_result.y_bottom):
+    #         lc = rod_result.poly_c(y1)
+    #         lw = rod_result.poly_w(y1)
+    #         lx1 = int(lc - lw / 2)
+    #         lx2 = int(lc + lw / 2)
+    #         cv2.line(self.overlay, (lx1, y1), (lx2, y1), color, width)
 
     def draw_rect(self, rect, color, width=2):
         x = rect.x
@@ -443,9 +446,66 @@ class ProcessInpainter(ProcessorBase):
         h = rect.h
         cv2.rectangle(self.overlay, (x, y), (x + w - 1, y + h - 1), color, width)
 
+    def draw_rod(self, roi_rect, rod):
+        ys = np.linspace(roi_rect.y, roi_rect.y + roi_rect.h, num=10)
+
+        xc = rod.poly_c(ys)
+        xw = rod.poly_w(ys)
+
+        def _draw_poly(xs, color):
+            # Format the points for OpenCV and draw polyline
+            # Points must be (x, y) integers in a shape of (N, 1, 2)
+            pts = np.column_stack((xs, ys)).astype(np.int32)
+            pts = pts.reshape((-1, 1, 2))
+            cv2.polylines(self.overlay, [pts], isClosed=False, color=color, thickness=2, lineType=cv2.LINE_AA)
+
+        x1s = xc - xw / 2
+        x2s = xc + xw / 2
+        _draw_poly(x1s, (0, 255, 255))
+        _draw_poly(x2s, (0, 255, 255))
+
+        x1s -= ROD_DILATE_PX
+        x2s += ROD_DILATE_PX
+        _draw_poly(x1s, (0, 0, 255))
+        _draw_poly(x2s, (0, 0, 255))
+
+        x1s -= ROD_BLUR_PX
+        x2s += ROD_BLUR_PX
+        _draw_poly(x1s, (0, 255, 0))
+        _draw_poly(x2s, (0, 255, 0))
+
+
     def export(self):
         return super().export()
 
     def release(self):
         super().release()
+
+    def inpaint_poly_left(self, roi_rect, roi_rgb, rod):
+        ry1 = roi_rect.y
+        ry2 = ry1 + roi_rect.h
+        rx1 = roi_rect.x
+        rx2 = rx1 + roi_rect.w
+
+        ry_top = rod.y_top # - self.rod_blur_py
+        for y1 in range(ry_top, ry2):
+            lc = rod.poly_c(y1) - rx1
+            lw = rod.poly_w(y1)
+
+            # X values:
+            # x0 --> blur (w0) --> x1 (left) --> full (w1) -> x2 (right)
+            x1 = int(lc - lw / 2) - ROD_DILATE_PX
+            x2 = int(lc + lw / 2) + ROD_DILATE_PX
+            x0 = x1 - ROD_BLUR_PX
+            w0 = x1 - x0
+            w1 = x2 - x1
+
+            ly  = y1 - ry1
+            rgb_row = roi_rgb[ly, :]
+
+            # Version A: copy X1-X2 mirrored around X1 as-is, no blur.
+            src_row = rgb_row[x1 : x1 - w1 : -1, :]
+            rgb_row[x1 : x2] = src_row[:]
+
+        return roi_rgb
 
