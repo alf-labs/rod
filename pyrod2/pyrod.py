@@ -22,6 +22,7 @@ try:
     from flask import Flask, render_template, Response, request, jsonify
     from process_coupler import CouplerTracker
     from process_detector import RodDetector #, ROD_DILATE_PX, ROD_BLUR_PX
+    from process_inpainter import ProcessInpainter
 except ModuleNotFoundError as e:
     print(f"ERROR: Missing library. {e}")
     print( "To fix: $ pip install opencv-python numpy scipy imutils flask")
@@ -320,6 +321,10 @@ class Main:
                 self.processors.append( detector )
                 if self.coupler_path:
                     detector.read_json(self.export_content)
+
+                # Processor #2
+                inpainter = ProcessInpainter(tracker, detector)
+                self.processors.append( inpainter )
 
             #     self.processors.append( Detector(processor,
             #         inpainting=None if args.detector_preview else args.inpaint,

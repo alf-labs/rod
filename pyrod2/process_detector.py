@@ -19,7 +19,6 @@ class RodDetector(ProcessorBase):
         self.tracker_templates = coupler_tracker.tracker_templates
         self.couplers = coupler_tracker.couplers
         self.current_template = None
-        self.current_search_rect = None
         self.rods = {}
         self.rods_fixed = False
 
@@ -32,6 +31,12 @@ class RodDetector(ProcessorBase):
         super().init_overlay(frame)
 
     def filter(self, window_title, frame_index, frame):
+        if ( (frame_index == self.start_frame or self.start_frame == 0)
+                and self.rods_fixed
+                and len(self.rods) > 0 ):
+            self.next_processor_requested = True
+            return frame
+
         h, w = frame.shape[:2]
         lab = cv2.cvtColor(frame, cv2.COLOR_BGR2LAB)
         lu = lab[:, :, 0]
@@ -69,22 +74,19 @@ class RodDetector(ProcessorBase):
             # print(f"@@ [{frame_index:04d}] Reuse ROD {result}")
 
         if self.compute_overlay and result is not None:
-            run_color = (0, 165, 255)
-            first_lc = None
-            last_lc = None
-            for y1 in range(result.y_top, result.y_bottom):
-                lc = result.poly_c(y1)
-                if first_lc is None: first_lc = lc
-                last_lc = lc
-                lw = result.poly_w(y1)
-                lx1 = int(lc - lw / 2)
-                lx2 = int(lc + lw / 2)
-                cv2.line(self.overlay, (lx1, y1), (lx2, y1), run_color, 1)
-            # print(f"@@ DEBUG [{frame_index:04d} LC {first_lc:.3f} -> {last_lc:.3f}]")
+            self.draw_rod(result, (0, 165, 255), width=1)
 
         # # For debug purposes, we display any changes made to the LU image.
         # frame = cv2.cvtColor(lu, cv2.COLOR_GRAY2BGR)
         return frame
+
+    def draw_rod(self, rod_result, color, width=1):
+        for y1 in range(rod_result.y_top, rod_result.y_bottom):
+            lc = rod_result.poly_c(y1)
+            lw = rod_result.poly_w(y1)
+            lx1 = int(lc - lw / 2)
+            lx2 = int(lc + lw / 2)
+            cv2.line(self.overlay, (lx1, y1), (lx2, y1), color, width)
 
     def draw_rect(self, rect, color, width=2):
         x = rect.x
