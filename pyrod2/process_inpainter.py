@@ -3,11 +3,13 @@ import numpy as np
 import scipy
 from rect import Rect
 from processor import ProcessorBase
-from process_coupler import ROI_WIDTH_PCT, QUALITY_THRESHOLD
+from process_coupler import QUALITY_THRESHOLD
 
+ROI_WIDTH_PCT = 1/2
 # ROI_WIDTH_MULTIPLIER = 5 # x rod_width_px
 # ROI_HEIGHT = 400/720
 ROD_BLUR_PY = 40/720
+COUPLER_MULTIPLER = 4
 ROD_DILATE_PX = 5
 ROD_BLUR_PX = 21
 
@@ -495,9 +497,21 @@ class ProcessInpainter(ProcessorBase):
             lw = rod.poly_w(y1)
             self._left_merge(lc, lw, y1 - ry1, roi_rgb)
 
+        py = self.rod_blur_py
+        if py > 0:
+            lc1 = rod.poly_c(ry_top) - rx1
+            lw1 = rod.poly_w(ry_top)
+            for y1 in range(ry_top - py, ry_top):
+                t = (ry_top - y1) / py  # from 1 (top) to 0 (bottom, by ry_top)
+                lw = lw1 + lw1 * COUPLER_MULTIPLER * t
+                self._left_merge(lc1, lw, y1 - ry1, roi_rgb, 1 - t)
+
         return roi_rgb
 
-    def _left_merge(self, lc, lw, ly, roi_rgb):
+    def _left_merge(self, lc, lw, ly, roi_rgb, y_src_blend=1):
+        if y_src_blend <= 0:
+            return
+
         # X values:
         # x0 --> blend (w0) --> x1 (left) --> full (w1) --> x2 (right) --> blend (w2) --> x3
         # Left  algorithm: no blend on left (x0..x1), blend on the right (x2..x3)
@@ -512,6 +526,10 @@ class ProcessInpainter(ProcessorBase):
 
         rgb_row = roi_rgb[ly, :]
 
+        coef = int(y_src_blend * 256)
+        if coef < 256:
+            rgb_row = rgb_row.copy()
+
         # Part 1: copy X1-X2 mirrored around X1 as-is, no blend.
         src_row = rgb_row[x1 : x1 - w1 : -1, :]
         rgb_row[x1 : x2] = src_row[:]
@@ -520,9 +538,19 @@ class ProcessInpainter(ProcessorBase):
         src_row_u16 = rgb_row[x1 - w1 : x1 - w1 - w2 : -1, :].astype(np.uint16)
         dst_row_u16 = rgb_row[x2 : x3].astype(np.uint16)
         blend_u16 = self.rod_blend_x_u16
+        # print(f"@@ x1 {x1} > x2 {x2} + {w2} > x3 {x3} -- coef {coef} -- rgb {rgb_row.shape}, src {src_row_u16.shape}, dst {dst_row_u16.shape}, blend {blend_u16.shape}")
         blended = (
-                    dst_row_u16 * blend_u16[:   , np.newaxis]
+                  dst_row_u16 * blend_u16[:   , np.newaxis]
                 + src_row_u16 * blend_u16[::-1, np.newaxis]
             ) / 256
         rgb_row[x2 : x3] = blended.astype(np.uint8)
+
+        if coef < 256:
+            org_row_u16 = roi_rgb[ly, :].astype(np.uint16)
+            new_row_u16 = rgb_row[    :].astype(np.uint16)
+            blended = (
+                  new_row_u16 * coef
+                + org_row_u16 * (256 - coef)
+            ) / 256
+            roi_rgb[ly, :] = blended.astype(np.uint8)
 
