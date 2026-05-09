@@ -9,7 +9,7 @@ from process_coupler import ROI_WIDTH_PCT, QUALITY_THRESHOLD
 # ROI_HEIGHT = 400/720
 ROD_BLUR_PY = 40/720
 ROD_DILATE_PX = 5
-ROD_BLUR_PX = 11
+ROD_BLUR_PX = 21
 
 class ProcessInpainter(ProcessorBase):
     def __init__(self, coupler_tracker, rod_detector, inpainting="left", rod_dilate_px=ROD_DILATE_PX, rod_blur_px=ROD_BLUR_PX):
@@ -138,37 +138,37 @@ class ProcessInpainter(ProcessorBase):
 
     #     return flood_mask[1:-1, 1:-1] * 255
 
-    def draw_mask_heatmap(self, mask_u8, roi_rect):
-        h, w = mask_u8.shape
-        overlay_view = self.overlay[roi_rect.y : roi_rect.y + h, roi_rect.x : roi_rect.x + w]
-        # overlay_view[mask_u8 >    1] = (0, 255, 255)
-        # overlay_view[mask_u8 >  128] = (0, 128, 255)
-        # overlay_view[mask_u8 == 255] = (0,   0, 255)
-        # Fill the overlay with (0, mask_u8, 255)
-        heatmap = overlay_view.copy()
-        heatmap[:, :, 0] = 0
-        heatmap[:, :, 1] = mask_u8
-        heatmap[:, :, 2] = 255
-        overlay_view[mask_u8 > 0] = heatmap[mask_u8 > 0]
+    # def draw_mask_heatmap(self, mask_u8, roi_rect):
+    #     h, w = mask_u8.shape
+    #     overlay_view = self.overlay[roi_rect.y : roi_rect.y + h, roi_rect.x : roi_rect.x + w]
+    #     # overlay_view[mask_u8 >    1] = (0, 255, 255)
+    #     # overlay_view[mask_u8 >  128] = (0, 128, 255)
+    #     # overlay_view[mask_u8 == 255] = (0,   0, 255)
+    #     # Fill the overlay with (0, mask_u8, 255)
+    #     heatmap = overlay_view.copy()
+    #     heatmap[:, :, 0] = 0
+    #     heatmap[:, :, 1] = mask_u8
+    #     heatmap[:, :, 2] = 255
+    #     overlay_view[mask_u8 > 0] = heatmap[mask_u8 > 0]
 
-    def draw_mask_outline(self, mask_u8, roi_rect):
-        h, w = mask_u8.shape
-        overlay_view = self.overlay[roi_rect.y : roi_rect.y + h, roi_rect.x : roi_rect.x + w]
+    # def draw_mask_outline(self, mask_u8, roi_rect):
+    #     h, w = mask_u8.shape
+    #     overlay_view = self.overlay[roi_rect.y : roi_rect.y + h, roi_rect.x : roi_rect.x + w]
 
-        rows = np.arange(h)     # all rows as indices [0...h-1]
+    #     rows = np.arange(h)     # all rows as indices [0...h-1]
 
-        # argmax returns the index of the FIRST True value it encounters
-        # axis=1 means to accross axis 1 (which is W in the H,W order)
-        start0 = np.argmax(mask_u8 > 0, axis=1)
-        start2 = np.argmax(mask_u8 == 255, axis=1)
-        flip_u8 = mask_u8[:, ::-1]  # step -1 mirrors on W axis
-        end0 = (w - 1) - np.argmax(flip_u8 > 0, axis=1)
-        end2 = (w - 1) - np.argmax(flip_u8 == 255, axis=1)
+    #     # argmax returns the index of the FIRST True value it encounters
+    #     # axis=1 means to accross axis 1 (which is W in the H,W order)
+    #     start0 = np.argmax(mask_u8 > 0, axis=1)
+    #     start2 = np.argmax(mask_u8 == 255, axis=1)
+    #     flip_u8 = mask_u8[:, ::-1]  # step -1 mirrors on W axis
+    #     end0 = (w - 1) - np.argmax(flip_u8 > 0, axis=1)
+    #     end2 = (w - 1) - np.argmax(flip_u8 == 255, axis=1)
 
-        overlay_view[rows, start0] = (0, 255, 255)
-        overlay_view[rows, start2] = (0,   0, 255)
-        overlay_view[rows, end2  ] = (0,   0, 255)
-        overlay_view[rows, end0  ] = (0, 255, 255)
+    #     overlay_view[rows, start0] = (0, 255, 255)
+    #     overlay_view[rows, start2] = (0,   0, 255)
+    #     overlay_view[rows, end2  ] = (0,   0, 255)
+    #     overlay_view[rows, end0  ] = (0, 255, 255)
 
     # def draw_mask_line(self, mask_u8, roi_x_left, y_mask):
     #     _, w = mask_u8.shape
@@ -385,29 +385,28 @@ class ProcessInpainter(ProcessorBase):
         rx2 = rx1 + roi_rect.w
 
         roi_rgb = frame[ry1 : ry2, rx1 : rx2]
-        roi_mask_u8 = np.zeros((roi_rect.h, roi_rect.w), np.uint8)
-        ry_top = rod.y_top - self.rod_blur_py
-        for y1 in range(ry_top, ry2):
-            lc = rod.poly_c(y1)
-            lw = rod.poly_w(y1)
-            lx1 = int(lc - lw / 2 - rx1)
-            lx2 = int(lc + lw / 2 - rx1)
-            ly  = y1 - ry1
-            roi_mask_u8[ly, lx1 : lx2] = 255
+        # roi_mask_u8 = np.zeros((roi_rect.h, roi_rect.w), np.uint8)
+        # ry_top = rod.y_top - self.rod_blur_py
+        # for y1 in range(ry_top, ry2):
+        #     lc = rod.poly_c(y1)
+        #     lw = rod.poly_w(y1)
+        #     lx1 = int(lc - lw / 2 - rx1)
+        #     lx2 = int(lc + lw / 2 - rx1)
+        #     ly  = y1 - ry1
+        #     roi_mask_u8[ly, lx1 : lx2] = 255
 
-        # Original: Dilate by (1, h_dilate_width), blur by (h_dilate_width, 1)
-        # Experiment: Dilate by (1, h_dilate_width), blur by (h_dilate_width, 1)
-        roi_mask_u8 = cv2.dilate(roi_mask_u8, self.rod_dilate_kernel, iterations=1)
-        blur_mask_u8 = cv2.GaussianBlur(roi_mask_u8, self.rod_blur_ksize, 0)
+        # # Original: Dilate by (1, h_dilate_width), blur by (h_dilate_width, 1)
+        # # Experiment: Dilate by (1, h_dilate_width), blur by (h_dilate_width, 1)
+        # roi_mask_u8 = cv2.dilate(roi_mask_u8, self.rod_dilate_kernel, iterations=1)
+        # blur_mask_u8 = cv2.GaussianBlur(roi_mask_u8, self.rod_blur_ksize, 0)
 
-        if self.view_mask and self.compute_overlay:
-            self.draw_mask_heatmap(blur_mask_u8, roi_rect)
-            # self.draw_mask_outline(blur_mask_u8, 0)
-            # self.draw_mask_line(blur_mask_u8, 0, -10)
+        # if self.view_mask and self.compute_overlay:
+        #     self.draw_mask_heatmap(blur_mask_u8, roi_rect)
+        #     # self.draw_mask_outline(blur_mask_u8, 0)
+        #     # self.draw_mask_line(blur_mask_u8, 0, -10)
 
         if self.inpaint_method:
-            # inpainted = self.inpaint_method(roi_rgb, blur_mask_u8)
-            inpainted = self.inpaint_poly_left(roi_rect, roi_rgb, rod)
+            inpainted = self.inpaint_method(roi_rect, roi_rgb, rod)
             frame[ry1 : ry2, rx1 : rx2] = inpainted
 
         if self.view_mask and self.compute_overlay:
@@ -456,28 +455,27 @@ class ProcessInpainter(ProcessorBase):
         xc = rod.poly_c(ys)
         xw = rod.poly_w(ys)
 
-        def _draw_poly(xs, color):
-            # Format the points for OpenCV and draw polyline
-            # Points must be (x, y) integers in a shape of (N, 1, 2)
-            pts = np.column_stack((xs, ys)).astype(np.int32)
-            pts = pts.reshape((-1, 1, 2))
-            cv2.polylines(self.overlay, [pts], isClosed=False, color=color, thickness=2, lineType=cv2.LINE_AA)
-
         x1s = xc - xw / 2
         x2s = xc + xw / 2
-        _draw_poly(x1s, (0, 255, 255))
-        _draw_poly(x2s, (0, 255, 255))
+        self._draw_poly(x1s, ys, (0, 255, 255))
+        self._draw_poly(x2s, ys, (0, 255, 255))
 
         x1s -= ROD_DILATE_PX
         x2s += ROD_DILATE_PX
-        _draw_poly(x1s, (0, 0, 255))
-        _draw_poly(x2s, (0, 0, 255))
+        self._draw_poly(x1s, ys, (0, 0, 255))
+        self._draw_poly(x2s, ys, (0, 0, 255))
 
         x1s -= ROD_BLUR_PX
         x2s += ROD_BLUR_PX
-        _draw_poly(x1s, (0, 255, 0))
-        _draw_poly(x2s, (0, 255, 0))
+        self._draw_poly(x1s, ys, (0, 255, 0))
+        self._draw_poly(x2s, ys, (0, 255, 0))
 
+    def _draw_poly(self, xs, ys, color):
+        # Format the points for OpenCV and draw polyline
+        # Points must be (x, y) integers in a shape of (N, 1, 2)
+        pts = np.column_stack((xs, ys)).astype(np.int32)
+        pts = pts.reshape((-1, 1, 2))
+        cv2.polylines(self.overlay, [pts], isClosed=False, color=color, thickness=1, lineType=cv2.LINE_AA)
 
     def export(self):
         return super().export()
@@ -495,35 +493,36 @@ class ProcessInpainter(ProcessorBase):
         for y1 in range(ry_top, ry2):
             lc = rod.poly_c(y1) - rx1
             lw = rod.poly_w(y1)
-
-            # X values:
-            # x0 --> blend (w0) --> x1 (left) --> full (w1) --> x2 (right) --> blend (w2) --> x3
-            # Left  algorithm: no blend on left (x0..x1), blend on the right (x2..x3)
-            # Right algorithm: blend on the left (x0..x1), no blend on right (x2..x3), only
-            x1 = int(lc - lw / 2) - ROD_DILATE_PX
-            x2 = int(lc + lw / 2) + ROD_DILATE_PX
-            x0 = x1 - ROD_BLUR_PX
-            x3 = x2 + ROD_BLUR_PX
-            w0 = x1 - x0
-            w1 = x2 - x1
-            w2 = x3 - x2
-
-            ly  = y1 - ry1
-            rgb_row = roi_rgb[ly, :]
-
-            # Part 1: copy X1-X2 mirrored around X1 as-is, no blend.
-            src_row = rgb_row[x1 : x1 - w1 : -1, :]
-            rgb_row[x1 : x2] = src_row[:]
-
-            # Part 2: blend X2-X3 mirrored around X1.
-            src_row_u16 = rgb_row[x1 - w1 : x1 - w1 - w2 : -1, :].astype(np.uint16)
-            dst_row_u16 = rgb_row[x2 : x3].astype(np.uint16)
-            blend_u16 = self.rod_blend_x_u16
-            blended = (
-                      dst_row_u16 * blend_u16[:   , np.newaxis]
-                    + src_row_u16 * blend_u16[::-1, np.newaxis]
-                ) / 256
-            rgb_row[x2 : x3] = blended.astype(np.uint8)
+            self._left_merge(lc, lw, y1 - ry1, roi_rgb)
 
         return roi_rgb
+
+    def _left_merge(self, lc, lw, ly, roi_rgb):
+        # X values:
+        # x0 --> blend (w0) --> x1 (left) --> full (w1) --> x2 (right) --> blend (w2) --> x3
+        # Left  algorithm: no blend on left (x0..x1), blend on the right (x2..x3)
+        # Right algorithm: blend on the left (x0..x1), no blend on right (x2..x3), only
+        x1 = int(lc - lw / 2) - ROD_DILATE_PX
+        x2 = int(lc + lw / 2) + ROD_DILATE_PX
+        x0 = x1 - ROD_BLUR_PX
+        x3 = x2 + ROD_BLUR_PX
+        w0 = x1 - x0
+        w1 = x2 - x1
+        w2 = x3 - x2
+
+        rgb_row = roi_rgb[ly, :]
+
+        # Part 1: copy X1-X2 mirrored around X1 as-is, no blend.
+        src_row = rgb_row[x1 : x1 - w1 : -1, :]
+        rgb_row[x1 : x2] = src_row[:]
+
+        # Part 2: blend X2-X3 mirrored around X1.
+        src_row_u16 = rgb_row[x1 - w1 : x1 - w1 - w2 : -1, :].astype(np.uint16)
+        dst_row_u16 = rgb_row[x2 : x3].astype(np.uint16)
+        blend_u16 = self.rod_blend_x_u16
+        blended = (
+                    dst_row_u16 * blend_u16[:   , np.newaxis]
+                + src_row_u16 * blend_u16[::-1, np.newaxis]
+            ) / 256
+        rgb_row[x2 : x3] = blended.astype(np.uint8)
 
