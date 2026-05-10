@@ -29,7 +29,7 @@ elif [[ "$A" == "0p1" ]]; then
     )
 elif [[ "$A" == "0p2" ]]; then
     ( set -x
-    time ./_run.sh $ARGS $@
+    time ./_run.sh --display=full $ARGS $@
     )
 else
     echo "@@ Missing test argument."

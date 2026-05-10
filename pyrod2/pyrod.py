@@ -335,6 +335,8 @@ class Main:
                         rod_dilate_px=args.rod_dilate_px,
                         rod_blur_px=args.rod_blur_px,
                     )
+                    if display_mode == DISPLAY_WITH_OVERLAY:
+                        inpainter.view_mask = True
                     self.processors.append( inpainter )
 
             for p in self.processors:

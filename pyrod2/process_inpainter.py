@@ -68,7 +68,7 @@ class ProcessInpainter(ProcessorBase):
         cr.recenter_to(coupler.center.x, coupler.center.y)
 
         # The overall ROI window (from top of static coupler template to bottom of video)
-        roi_rect = self.get_search_window(coupler_template)
+        roi_rect = self.get_search_window(cr)
         ry1 = roi_rect.y
         ry2 = ry1 + roi_rect.h
         rx1 = roi_rect.x
@@ -87,11 +87,10 @@ class ProcessInpainter(ProcessorBase):
 
         return frame
 
-    def get_search_window(self, coupler_template):
+    def get_search_window(self, coupler_rect):
         width = self.width
         height = self.height
-        template_rect = coupler_template.rect
-        c = template_rect.center()
+        c = coupler_rect.center()
         w = int(ROI_WIDTH_PCT * width)
         if self.roi_rect is None:
             y = coupler_rect.y - coupler_rect.h
