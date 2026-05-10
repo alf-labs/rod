@@ -198,12 +198,6 @@ class RodDetector(ProcessorBase):
 
             # debug
             if self.compute_overlay:
-                # display current run
-                # if run_bounds is not None:
-                #     run_color = (0, 165, 255)
-                #     lx1 = rod_bounds[3]
-                #     lx2 = rod_bounds[4]
-                #     cv2.line(self.overlay, (lx1, y1), (lx2, y1), run_color, 1)
                 # display the curve at the bottom of the SR rect
                 if y1 == sr.y + sr.h - 1:
                     self.draw_rect(sr,    (  0, 255, 0), width=1)
@@ -215,19 +209,13 @@ class RodDetector(ProcessorBase):
         if len(all_bounds) < 2:
             return None
 
-        # x1s = [r[3] for r in all_bounds]
-        # x2s = [r[4] for r in all_bounds]
-        # dx1 = max(x1s) - min(x1s)
-        # dx2 = max(x2s) - min(x2s)
-        # print(f"@@ [{frame_index:04d}] max1:{dx1:3d}, {dx1 / (yb - yt)}")
-        # print(f"@@ [{frame_index:04d}] max2:{dx2:3d}, {dx2 / (yb - yt)}")
-
         # TBD: replace all_bounds array by 3 arrays for y/c/w.
         np_y = np.array( [ r[0] for r in all_bounds ] )
         np_c = np.array( [ r[1] for r in all_bounds ] )
         np_w = np.array( [ r[2] for r in all_bounds ] )
-        poly_c = np.polynomial.Polynomial.fit(np_y, np_c, deg=2)    # 2 or 3?
-        poly_w = np.polynomial.Polynomial.fit(np_y, np_w, deg=1)    # 1 or 2?
+        # poly_c: deg=2 looked better than deg=3.
+        poly_c = np.polynomial.Polynomial.fit(np_y, np_c, deg=2)
+        poly_w = np.polynomial.Polynomial.fit(np_y, np_w, deg=1)
 
         return RodResult(
             frame_index=frame_index,
@@ -307,10 +295,6 @@ class RodDetector(ProcessorBase):
 
     def fix_bent_rods(self):
         self.rods_fixed = True
-        # last_top = None
-        # last_frame = None
-        # ts = []
-        # bs = []
 
         c2 = np.array( [ abs(r.poly_c.coef[2]) for r in self.rods.values() ] )
         c2_abs = np.median( c2 )
@@ -325,57 +309,14 @@ class RodDetector(ProcessorBase):
                 remove_frames.append(frame)
                 print(f"@@ [{frame:04d}] REMOVE {c2:.4f} > {threshold:.4f} --- {'THRESHOLD' if is_bent else '-'}")
 
-            # x2.append(c2)
-            # print(f"@@ [{frame:04d}] {c2:.4f} ==> {score1:.4f} vs {score2:.4f} vs {score3:.4f} --- {'THRESHOLD' if is_bent else '-'}")
-            # y_top = rod.y_top
-            # y_bot = rod.y_bottom
-            # y_mid = (y_top + y_bot) / 2
-
-            # x_top = rod.poly_c(y_top)
-            # x_mid = rod.poly_c(y_mid)
-            # x_bot = rod.poly_c(y_bot)
-
-
-
-            # if last_top is not None:
-            #     dx_top = (x_top - last_top)
-            #     dx_bot = (x_bot - x_top)
-            #     print(f"@@ [{frame:04d}] {x_top:.1f} x {rod.y_top:03d} > {x_bot:.1f} x {rod.y_bottom:03d} -- DX Top: {dx_top:.3f}, Bot: {dx_bot:.3f}")
-            #     ts.append(dx_top)
-            #     bs.append(dx_bot)
-
-            # last_top = x_top
-            # last_frame = frame
-
         # Remove frames in place in the rods dictionary
         for frame in remove_frames:
             self.rods.pop(frame, None)
         print(f"@@ Removed {len(remove_frames)} bent rods; {len(self.rods)} rods left.")
 
-        # print(f"@@ COEF 2 MEDIAN Global {c2_med:.3f}, abs {c2_abs:.3f}, abs corrected {abs_med:.3f} -- thresold {threshold:.3f}")
-
-        # x2s = np.array( x2 )
-        # a2s = np.abs( x2s )
-        # print(f"@@ COEF 2 MIN T {np.min(x2s):.3f}, MEDIAN {np.median(x2s):.3f}, MAX {np.max(x2s):.3f}")
-        # print(f"@@ COEF 2 MIN T {np.min(a2s):.3f}, MEDIAN {np.median(a2s):.3f}, MAX {np.max(a2s):.3f}")
-
-        # ts = np.array( ts )
-        # bs = np.array( bs )
-        # print(f"@@ MIN T {np.min(ts):.3f}, B {np.min(bs):.3f}")
-        # print(f"@@ MAX T {np.max(ts):.3f}, B {np.max(bs):.3f}")
-        # print(f"@@ MED T {np.median(ts):.3f}, B {np.median(bs):.3f}")
-
     def fix_missing_rods(self):
         if not self.rods:
             return
-
-        # frames_existing = np.array([r.frame_index for r in self.rods.values()])
-        # # Full range of frames from first to last
-        # all_frames = np.arange(frames_existing.min(), frames_existing.max() + 1)
-        # # Find which frames are actually missing
-        # missing_mask = np.isin(all_frames, frames_existing, invert=True)
-        # missing_frames = all_frames[missing_mask]
-        # print(f"@@ {len(missing_frames)} missing frames to interpolate: {missing_frames}")
 
         frames_existing = np.sort(np.array( [ r.frame_index for r in self.rods.values() ] ))
         # Find where the gap between consecutive frames is > 1
@@ -388,13 +329,10 @@ class RodDetector(ProcessorBase):
 
             rod1 = self.rods[frame1]
             rod2 = self.rods[frame2]
-            # print(f"@@ INTERP 1: Left  [{frame1:04d}] {repr(rod1)}")
-            # print(f"@@ INTERP 1: Right [{frame2:04d}] {repr(rod2)}")
 
-            # These are the indices you need to fill
+            # Indices we need to fill
             missing_range = np.arange(frame1 + 1, frame2)
 
-            # Total distance for calculating 't' (0.0 to 1.0)
             num_frames = frame2 - frame1
 
             ic1 = rod1.initial_center
@@ -407,7 +345,6 @@ class RodDetector(ProcessorBase):
             print(f"@@ Interpolating from {frame1} to {frame2}")
 
             for frame in missing_range:
-                # Calculate t: how far are we into the gap?
                 t = (frame - frame1) / num_frames
 
                 ic = int(ic1 + t * ic1_range)
@@ -425,10 +362,6 @@ class RodDetector(ProcessorBase):
 
                 self.rods[frame] = result
                 print(f"@@ Interp Rod [{frame:04d}] {t:.3f} -> {result}")
-
-                # ... save new_poly for f_idx ...
-                # print(f"@@ INTERP 2: Left [{left_frame:04d}] {poly_at_left}, Right [{right_frame:04d}] {poly_at_right}, {t}, ==> {new_poly}")
-                # print(f"@@ INTERP 2:  [{frame:04d}]   {t}, ==> {RodResult.poly_to_json(new_poly)}")
 
         # Finally sort the dictionary by key to maintain a consistent frame ordering
         # (Python dicts are ordered so new keys were added at the end, we need them in key order)
