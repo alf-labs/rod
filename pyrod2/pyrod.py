@@ -95,10 +95,7 @@ class Main:
         parser.add_argument("-0", "--coupler-only", action="store_true", help="Only run top-coupler location process")
         parser.add_argument(      "--load-json", default="", help="JSON data to read back")
 
-        # parser.add_argument("-0", "--locator-only", action="store_true", help="Only run locator process")
-        # parser.add_argument(      "--locator-rod-sz", default="50,30,75,/1280", help="Locator Rod size/min/max")
-        # parser.add_argument("-1", "--detector-preview", action="store_true", help="Run in preview (no inpaint)")
-
+        parser.add_argument(      "--rod-widths", default="15,40,/1280", help="Detector Rod size top vs bottom")
         parser.add_argument("-p", "--inpaint", default="left", choices=["left", "right", "mix", "none"], help="Inpaint algorithm")
         parser.add_argument(      "--rod-dilate-px", type=int, default=ROD_DILATE_PX, help="Dilate filter kernel after rod detection")
         parser.add_argument(      "--rod-blur-px", type=int, default=ROD_BLUR_PX, help="Blur filter kernel after rod detection")
@@ -280,11 +277,15 @@ class Main:
             self.paused = False
 
             if isinstance(self.start_frame, tuple):
-                print(f"@@ Start frame: {self.start_frame} --> frame {self.start_frame[0] * fps}")
+                print(f"@@ Start frame: {self.start_frame} --> frame {self.start_frame[0] * fps}, fps {fps}")
                 self.start_frame = int(self.start_frame[0] * fps)
+            else:
+                print(f"@@ Start frame: {self.start_frame}, fps {fps}")
             if isinstance(self.end_frame, tuple):
-                print(f"@@ End frame: {self.end_frame} --> frame {self.end_frame[0] * fps}")
+                print(f"@@ End frame: {self.end_frame} --> frame {self.end_frame[0] * fps}, fps {fps}")
                 self.end_frame = int(self.end_frame[0] * fps)
+            else:
+                print(f"@@ End frame: {self.end_frame}, fps {fps}")
 
             do_crop = False
             cropped_width = vid_width
@@ -308,7 +309,6 @@ class Main:
             processor_idx = 0
             tracker = CouplerTracker(
                     start_frame=self.start_frame,
-            #         locator_rod_sz_str=args.locator_rod_sz,
             )
             self.processors.append( tracker )
             if self.coupler_path:
@@ -317,7 +317,10 @@ class Main:
 
             if not args.coupler_only:
                 # Processor #1
-                detector = RodDetector(tracker)
+                detector = RodDetector(
+                    tracker,
+                    rod_widths_str=args.rod_widths
+                )
                 self.processors.append( detector )
                 if self.coupler_path:
                     detector.read_json(self.export_content)
@@ -394,9 +397,6 @@ class Main:
                         frame = frame[crop_y1:crop_y2, crop_x1:crop_x2]
                     if do_downscale == 2:
                         frame = cv2.pyrDown(frame) # downscale by a fixed 2x factor
-                    frame_count += 1
-                    if self.end_frame > 0 and self.end_frame == frame_count:
-                        end_reached = True
                     last_frame = frame.copy()
 
                 _skip_num = self.skip_num
@@ -453,6 +453,11 @@ class Main:
                     print("@@ Detector triggered pause. Space to continue.")
                     processor.trigger_pause = False
                     self.paused = True
+
+                if not self.paused:
+                    frame_count += 1
+                    if self.end_frame > 0 and self.end_frame == frame_count:
+                        end_reached = True
 
                 end_loop_s = time.perf_counter()
                 loop_s = end_loop_s - start_loop_s

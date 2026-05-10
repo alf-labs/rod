@@ -8,7 +8,7 @@ from rect import Rect
 from coupler_result import CouplerResult
 from coupler_template import CouplerTemplate
 
-ROI_WIDTH_PCT = 1/3
+ROI_WIDTH_PCT = 1/2
 QUALITY_THRESHOLD = 0.1
 
 class CouplerTracker(ProcessorBase):

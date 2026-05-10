@@ -1,6 +1,7 @@
 import cv2
 import math
 import numpy as np
+import re
 from processor import ProcessorBase
 from point import Point
 from rect import Rect
@@ -12,7 +13,7 @@ ROD_W_TOP = 15 / 1280
 ROD_W_BOT = 40 / 1280
 
 class RodDetector(ProcessorBase):
-    def __init__(self, coupler_tracker):
+    def __init__(self, coupler_tracker, rod_widths_str):
         super().__init__()
         self.coupler_tracker = coupler_tracker
         self.start_frame = coupler_tracker.start_frame
@@ -21,6 +22,19 @@ class RodDetector(ProcessorBase):
         self.current_template = None
         self.rods = {}
         self.rods_fixed = False
+        self.parse_rod_widths_str(rod_widths_str)
+
+    def parse_rod_widths_str(self, rod_widths_str):
+        pattern = r"(?P<top>\d+),(?P<bot>\d+),/(?P<width>\d+)"
+        match = re.search(pattern, rod_widths_str)
+        assert match is not None, "Expected syntax: 'top,bottom,/width', e.g. '15,40,/1280'"
+        _top = int(match.group("top"))
+        _bot = int(match.group("bot"))
+        _width = int(match.group("width"))
+        global ROD_W_TOP, ROD_W_BOT
+        ROD_W_TOP = _top / _width
+        ROD_W_BOT = _bot / _width
+        print(f"@@ Rod Widths args: {ROD_W_TOP} to {ROD_W_BOT}")
 
     def init_size(self, width, height):
         super().init_size(width, height)
