@@ -8,7 +8,7 @@ from rect import Rect
 from coupler_result import CouplerResult
 from coupler_template import CouplerTemplate
 
-ROI_WIDTH_PCT = 1/2
+ROI_WIDTH_PCT = 1/3
 QUALITY_THRESHOLD = 0.1
 
 class CouplerTracker(ProcessorBase):
@@ -16,13 +16,13 @@ class CouplerTracker(ProcessorBase):
         super().__init__()
         self.start_frame = start_frame
         self.current_template = None
-        self.current_search_rect = None
         self.tracker_templates = {}
         self.couplers = {}
         self.couplers_fixed = False
 
     def init_size(self, width, height):
         super().init_size(width, height)
+        self.roi_center = width / 2
 
     def init_overlay(self, frame):
         super().init_overlay(frame)
@@ -47,9 +47,7 @@ class CouplerTracker(ProcessorBase):
                 self.tracker_templates[frame_index] = self.current_template.copy()
                 print(f"@@ [frame #{frame_index:04d}] coupler {self.current_template.rect}, center {self.current_template.rect.center()}")
 
-        srect = self.current_search_rect
-        if srect is None:
-            srect = self.current_search_rect = self.get_search_window(w, h)
+        srect = self.get_search_window(w, h)
 
         has_result = frame_index in self.couplers
 
@@ -65,16 +63,19 @@ class CouplerTracker(ProcessorBase):
                 # Update current template with best match and add result
                 self.current_template.rect.x = max_loc[0] + srect.x
                 self.current_template.rect.y = max_loc[1] + srect.y
-                self.couplers[frame_index] = CouplerResult(
+                result = CouplerResult(
                     frame_index = frame_index,
                     center = self.current_template.rect.centerPoint(),
                     quality = quality,
                     coupler_ref = self.current_template.frame_index,
                 )
+                self.couplers[frame_index] = result
+                self.update_roi_center(result.center)
             color = (0, 255, 255)  # debug search frame is yellow
         else:
             # Reuse previous result
             result = self.couplers[frame_index]
+            self.update_roi_center(result.center)
             # we didn't record max_val and we just need it for debug display below.
             max_val = quality = result.quality
             # update the display rect for debug display
@@ -126,12 +127,14 @@ class CouplerTracker(ProcessorBase):
         h = rect.h
         cv2.rectangle(self.overlay, (x, y), (x + w - 1, y + h - 1), color, width)
 
+    def update_roi_center(self, center_point):
+        self.roi_center = self.roi_center * 0.9 + center_point.x * 0.1
+
     def get_search_window(self, width, height):
         template_rect = self.current_template.rect
-        c = template_rect.center()
         w = int(ROI_WIDTH_PCT * width)
         h = template_rect.h
-        x = c[0] - w // 2
+        x = int(self.roi_center - w // 2)
         y = template_rect.y - h
         h = height - y
         if x < 0:
