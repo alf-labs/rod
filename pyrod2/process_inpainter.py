@@ -19,6 +19,7 @@ class ProcessInpainter(ProcessorBase):
         self.tracker_templates = coupler_tracker.tracker_templates
         self.couplers = coupler_tracker.couplers
         self.current_template = None
+        self.roi_rect = None
         self.view_mask = inpainting is None
         self.inpaint_method = {
             "left":   self.inpaint_poly_left,
@@ -34,6 +35,7 @@ class ProcessInpainter(ProcessorBase):
     def init_size(self, width, height):
         super().init_size(width, height)
         print(f"@@ Inpainter init_size")
+        self.roi_center = width / 2
         self.rod_blur_py = int(ROD_BLUR_PY * height)
         print(f"Inpainter: Rod blur height {self.rod_blur_py} px")
         self.rod_blend_x_u16 = self.smoothstep(ROD_BLUR_PX)
@@ -66,7 +68,7 @@ class ProcessInpainter(ProcessorBase):
         cr.recenter_to(coupler.center.x, coupler.center.y)
 
         # The overall ROI window (from top of static coupler template to bottom of video)
-        roi_rect = self.get_search_window(w, h, coupler_template)
+        roi_rect = self.get_search_window(coupler_template)
         ry1 = roi_rect.y
         ry2 = ry1 + roi_rect.h
         rx1 = roi_rect.x
@@ -85,14 +87,19 @@ class ProcessInpainter(ProcessorBase):
 
         return frame
 
-    def get_search_window(self, width, height, coupler_template):
-        template_rect = coupler_template.rect.copy()
+    def get_search_window(self, coupler_template):
+        width = self.width
+        height = self.height
+        template_rect = coupler_template.rect
         c = template_rect.center()
         w = int(ROI_WIDTH_PCT * width)
-        h = template_rect.h
-        x = c[0] - w // 2
-        y = template_rect.y - h
+        if self.roi_rect is None:
+            y = coupler_rect.y - coupler_rect.h
+        else:
+            y = self.roi_rect.y
+        x = int(self.roi_center - w // 2)
         h = height - y
+        self.roi_center = self.roi_center * 0.9 + c[0] * 0.1
         if x < 0:
             x = 0
         elif x + w >= width:
@@ -101,7 +108,8 @@ class ProcessInpainter(ProcessorBase):
             y = 0
         elif y + h >= height:
             y = height - h
-        return Rect(x, y, w, h)
+        rect = self.roi_rect = Rect(x, y, w, h)
+        return rect
 
     def draw_rect(self, rect, color, width=2):
         x = rect.x

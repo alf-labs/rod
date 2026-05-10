@@ -16,6 +16,7 @@ class CouplerTracker(ProcessorBase):
         super().__init__()
         self.start_frame = start_frame
         self.current_template = None
+        self.roi_rect = None
         self.tracker_templates = {}
         self.couplers = {}
         self.couplers_fixed = False
@@ -47,7 +48,7 @@ class CouplerTracker(ProcessorBase):
                 self.tracker_templates[frame_index] = self.current_template.copy()
                 print(f"@@ [frame #{frame_index:04d}] coupler {self.current_template.rect}, center {self.current_template.rect.center()}")
 
-        srect = self.get_search_window(w, h)
+        srect = self.get_search_window()
 
         has_result = frame_index in self.couplers
 
@@ -70,12 +71,18 @@ class CouplerTracker(ProcessorBase):
                     coupler_ref = self.current_template.frame_index,
                 )
                 self.couplers[frame_index] = result
-                self.update_roi_center(result.center)
+                self.update_roi_center(result.center.x)
+            else:
+                self.update_roi_center(w / 2)
+
+            if self.compute_overlay:
+                self.draw_heatmap(srect, res, self.current_template)
+
             color = (0, 255, 255)  # debug search frame is yellow
         else:
             # Reuse previous result
             result = self.couplers[frame_index]
-            self.update_roi_center(result.center)
+            self.update_roi_center(result.center.x)
             # we didn't record max_val and we just need it for debug display below.
             max_val = quality = result.quality
             # update the display rect for debug display
@@ -94,7 +101,7 @@ class CouplerTracker(ProcessorBase):
             cv2.putText(self.overlay, text1,
                     (srect.x, texty),           # bottom-left coord
                     cv2.FONT_HERSHEY_DUPLEX,    # font
-                    .75,                        # font scale
+                    1,                          # font scale
                     color,                      # color
                     1 )                         # line thickness
             # print(f"@@ [frame #{frame_index}] --> val {max_val} at track {self.current_template.rect}")
@@ -127,15 +134,36 @@ class CouplerTracker(ProcessorBase):
         h = rect.h
         cv2.rectangle(self.overlay, (x, y), (x + w - 1, y + h - 1), color, width)
 
-    def update_roi_center(self, center_point):
-        self.roi_center = self.roi_center * 0.9 + center_point.x * 0.1
+    def draw_heatmap(self, srect, res, template):
+        # 1. Clip and Scale
+        # Since we care about the match (near 1.0), we can clip negative values to 0
+        # and scale the 0-1.0 range to 0-255.
+        res_clipped = np.clip(res, 0, 1.0)
+        res_u8 = (res_clipped * 255).astype(np.uint8)
 
-    def get_search_window(self, width, height):
+        # 2. Apply Colormap
+        # COLORMAP_JET: 255 (1.0) -> Red, 0 (0.0) -> Blue
+        heatmap = cv2.applyColorMap(res_u8, cv2.COLORMAP_JET)
+        x = srect.x + template.rect.w // 2
+        y = srect.y + template.rect.h // 2
+        h, w = heatmap.shape[:2]
+        dest = self.overlay[y : y + h, x : x + w]
+        mask = res_u8 > 64
+        dest[mask] = heatmap[mask]
+
+    def update_roi_center(self, center_x):
+        self.roi_center = self.roi_center * 0.9 + center_x * 0.1
+
+    def get_search_window(self):
+        width = self.width
+        height = self.height
         template_rect = self.current_template.rect
         w = int(ROI_WIDTH_PCT * width)
-        h = template_rect.h
+        if self.roi_rect is None:
+            y = template_rect.y - template_rect.h
+        else:
+            y = self.roi_rect.y
         x = int(self.roi_center - w // 2)
-        y = template_rect.y - h
         h = height - y
         if x < 0:
             x = 0
@@ -145,7 +173,8 @@ class CouplerTracker(ProcessorBase):
             y = 0
         elif y + h >= height:
             y = height - h
-        return Rect(x, y, w, h)
+        rect = self.roi_rect = Rect(x, y, w, h)
+        return rect
 
     def export(self):
         print(f"@@ CouplerTracker export")
@@ -270,6 +299,9 @@ class CouplerTracker(ProcessorBase):
         n = len(x)
         new_x = x.copy()
         k = 1.4826 # Scale factor for Gaussian distribution
+
+        if n < window_size:
+            return new_x
 
         # Create a sliding window view
         # This creates a virtual (N, window_len) array without copying memory

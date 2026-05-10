@@ -93,6 +93,7 @@ class Main:
         parser.add_argument(      "--no-json", action="store_true", help="Skip JSON Export")
 
         parser.add_argument("-0", "--coupler-only", action="store_true", help="Only run top-coupler location process")
+        parser.add_argument("-1", "--detector-only", action="store_true", help="Only run rod detector process")
         parser.add_argument(      "--load-json", default="", help="JSON data to read back")
 
         parser.add_argument(      "--rod-widths", default="15,40,/1280", help="Detector Rod size top vs bottom")
@@ -325,15 +326,16 @@ class Main:
                 if self.coupler_path:
                     detector.read_json(self.export_content)
 
-                # Processor #2
-                inpainter = ProcessInpainter(
-                    tracker,
-                    detector,
-                    inpainting=args.inpaint,
-                    rod_dilate_px=args.rod_dilate_px,
-                    rod_blur_px=args.rod_blur_px,
-                )
-                self.processors.append( inpainter )
+                if not args.detector_only:
+                    # Processor #2
+                    inpainter = ProcessInpainter(
+                        tracker,
+                        detector,
+                        inpainting=args.inpaint,
+                        rod_dilate_px=args.rod_dilate_px,
+                        rod_blur_px=args.rod_blur_px,
+                    )
+                    self.processors.append( inpainter )
 
             for p in self.processors:
                 p.compute_overlay = self.compute_overlay

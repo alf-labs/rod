@@ -25,11 +25,11 @@ elif [[ "$A" == "1p0" ]]; then
     )
 elif [[ "$A" == "0p1" ]]; then
     ( set -x
-    time ./_run.sh $ARGS $@
+    time ./_run.sh -1 $ARGS $@
     )
 elif [[ "$A" == "0p2" ]]; then
     ( set -x
-    time ./_run.sh -l "$LATEST_JSON" $ARGS $@
+    time ./_run.sh $ARGS $@
     )
 else
     echo "@@ Missing test argument."

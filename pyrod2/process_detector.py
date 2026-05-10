@@ -20,6 +20,7 @@ class RodDetector(ProcessorBase):
         self.tracker_templates = coupler_tracker.tracker_templates
         self.couplers = coupler_tracker.couplers
         self.current_template = None
+        self.roi_rect = None
         self.rods = {}
         self.rods_fixed = False
         self.parse_rod_widths_str(rod_widths_str)
@@ -38,6 +39,7 @@ class RodDetector(ProcessorBase):
 
     def init_size(self, width, height):
         super().init_size(width, height)
+        self.roi_center = width / 2
         self.rod_w_top = int(ROD_W_TOP * width)
         self.rod_w_bot = int(ROD_W_BOT * width)
 
@@ -70,7 +72,7 @@ class RodDetector(ProcessorBase):
         # This /could/ be used to only process a sub-area of the original frame for speed purposes
         # (right now it's only used for debug display reference, not for actual processing).
         if self.compute_overlay:
-            srect = self.get_search_window(w, h, coupler_template)
+            srect = self.get_search_window(cr)
             self.draw_rect(srect, (255, 255, 0))
 
         if self.compute_overlay:
@@ -129,14 +131,18 @@ class RodDetector(ProcessorBase):
         y1 = rect.y + rect.h - int(y)
         cv2.line(self.overlay, (x1, y1), (x2, y1), color, width)
 
-    def get_search_window(self, width, height, coupler_template):
-        template_rect = coupler_template.rect.copy()
-        c = template_rect.center()
+    def get_search_window(self, coupler_rect):
+        width = self.width
+        height = self.height
+        c = coupler_rect.center()
         w = int(ROI_WIDTH_PCT * width)
-        h = template_rect.h
-        x = c[0] - w // 2
-        y = template_rect.y - h
+        if self.roi_rect is None:
+            y = coupler_rect.y - coupler_rect.h
+        else:
+            y = self.roi_rect.y
+        x = int(self.roi_center - w // 2)
         h = height - y
+        self.roi_center = self.roi_center * 0.9 + c[0] * 0.1
         if x < 0:
             x = 0
         elif x + w >= width:
@@ -145,7 +151,8 @@ class RodDetector(ProcessorBase):
             y = 0
         elif y + h >= height:
             y = height - h
-        return Rect(x, y, w, h)
+        rect = self.roi_rect = Rect(x, y, w, h)
+        return rect
 
     def search_poly_rod(self, frame_index, w, h, lu, cr):
         """Experiment 2: Reimplement the old pixel-based Lua search but with a numpy take."""
