@@ -52,7 +52,7 @@ class ProcessorBase:
     def select_roi_called(self):
         self.select_roi_invoked = True
 
-    def filter(self, window_title, frame_index, frame):
+    def filter(self, window_info, frame_index, frame):
         return frame
 
     def pre_release(self):

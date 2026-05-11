@@ -190,16 +190,19 @@ class Main:
             self.skip_num = 1 + self.skip_num % 4
         elif key == ord('1'):
             self.zoom = 1
-            cv2.resizeWindow(WINDOW_TITLE, self.width, self.height)
+            self.resize_window(self.zoom)
         elif key == ord('2'):
             self.zoom = 2
-            cv2.resizeWindow(WINDOW_TITLE, self.width//2, self.height//2)
+            self.resize_window(self.zoom)
         elif key == ord('3'):
             self.zoom = 3
-            cv2.resizeWindow(WINDOW_TITLE, self.width//3, self.height//3)
+            self.resize_window(self.zoom)
         elif key == ord('4'):
             self.zoom = 4
-            cv2.resizeWindow(WINDOW_TITLE, self.width//4, self.height//4)
+            self.resize_window(self.zoom)
+
+    def resize_window(self, zoom):
+            cv2.resizeWindow(WINDOW_TITLE, self.width//zoom, self.height//zoom)
 
     def next_processor(self, processor, processor_idx):
         if processor is not None:
@@ -352,6 +355,12 @@ class Main:
                     "crop_roi":     self.crop_roi,
                 }
 
+            filter_window_info = {
+                "title": WINDOW_TITLE,
+                "pre_display": lambda: self.resize_window(1),
+                "post_display": lambda: self.resize_window(self.zoom),
+            }
+
             last_frame = None
             end_reached = False
             frame_count = self.start_frame
@@ -411,7 +420,7 @@ class Main:
                     if do_crop:
                         cv2.rectangle(processor.overlay, (0, 0), (cropped_width - 1, cropped_height - 1), (0,0,0), 1)
 
-                    result = processor.filter(WINDOW_TITLE, frame_count, frame)
+                    result = processor.filter(filter_window_info, frame_count, frame)
 
                     if processor.select_roi_invoked and mouse_callback:
                         # cv2.selectROI changes the mouse callback so we need to restore it

@@ -108,11 +108,13 @@ class CouplerTracker(ProcessorBase):
 
         return frame
 
-    def select_roi(self, window_title, frame_index, frame, lu):
+    def select_roi(self, window_info, frame_index, frame, lu):
         """Returns None if no ROI selected, otherwise returns a Template tuple."""
         super().select_roi_called()
         # print(f"@@ [frame #{frame_index}] Select top coupler area. 'c' to cancel, space/return to accept.")
-        rect = cv2.selectROI(window_title, frame, showCrosshair=True, fromCenter=False)
+        window_info["pre_display"]()
+        rect = cv2.selectROI(window_info["title"], frame, showCrosshair=True, fromCenter=False)
+        window_info["post_display"]()
         # Result rect should be empty if canceled.
         print(f"@@ [frame #{frame_index}] Result: ", repr(rect))
         # CV2 uses a tuple instead of a cv::Rect object so there's no .empty() method

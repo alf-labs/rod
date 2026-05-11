@@ -52,7 +52,7 @@ class ProcessInpainter(ProcessorBase):
         xs = np.arange(width_px) / width_px
         return (xs * xs * (3.0 - 2.0 * xs) * 256).astype(np.uint16)
 
-    def filter(self, window_title, frame_index, frame):
+    def filter(self, window_info, frame_index, frame):
         h, w = frame.shape[:2]
         coupler = self.coupler_tracker.couplers[frame_index]
         rod = self.rod_detector.rods[frame_index]
