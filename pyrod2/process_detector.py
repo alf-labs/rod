@@ -92,19 +92,37 @@ class RodDetector(ProcessorBase):
             # print(f"@@ [{frame_index:04d}] Reuse ROD {result}")
 
         if self.compute_overlay and result is not None:
-            self.draw_rod(result, (0, 165, 255), width=1)
+            self.draw_rod_outline(srect, result, (0, 165, 255), width=1)
 
         # # For debug purposes, we display any changes made to the LU image.
         # frame = cv2.cvtColor(lu, cv2.COLOR_GRAY2BGR)
         return frame
 
-    def draw_rod(self, rod_result, color, width=1):
+    def draw_rod_filled(self, rod_result, color, width=1):
         for y1 in range(rod_result.y_top, rod_result.y_bottom):
             lc = rod_result.poly_c(y1)
             lw = rod_result.poly_w(y1)
             lx1 = int(lc - lw / 2)
             lx2 = int(lc + lw / 2)
             cv2.line(self.overlay, (lx1, y1), (lx2, y1), color, width)
+
+    def draw_rod_outline(self, roi_rect, rod, color, width=1):
+        ys = np.linspace(roi_rect.y, roi_rect.y + roi_rect.h, num=10)
+
+        xc = rod.poly_c(ys)
+        xw = rod.poly_w(ys)
+
+        x1s = xc - xw / 2 + (width - 1)
+        x2s = xc + xw / 2 - (width - 1)
+        self._draw_poly(x1s, ys, color, width)
+        self._draw_poly(x2s, ys, color, width)
+
+    def _draw_poly(self, xs, ys, color, width=1):
+        # Format the points for OpenCV and draw polyline
+        # Points must be (x, y) integers in a shape of (N, 1, 2)
+        pts = np.column_stack((xs, ys)).astype(np.int32)
+        pts = pts.reshape((-1, 1, 2))
+        cv2.polylines(self.overlay, [pts], isClosed=False, color=color, thickness=width, lineType=cv2.LINE_AA)
 
     def draw_rect(self, rect, color, width=2):
         x = rect.x
@@ -186,6 +204,9 @@ class RodDetector(ProcessorBase):
             # Note: do not run cv2.normalize(0..255). It's idempotent with the percentile threshold below.
             y_lu_u8 = lu[y1, x1 : x2]
 
+            # Experiment: Check the quality of the line: does it have enough contrast?
+            f_contrast = int(np.max(y_lu_u8) - np.min(y_lu_u8))
+
             # Select everything that is higher than the 80th percentile.
             f_threshold = np.percentile(y_lu_u8, 80)
             selected_01 = (y_lu_u8 >= f_threshold).astype(np.uint8)
@@ -200,6 +221,12 @@ class RodDetector(ProcessorBase):
 
             # debug
             if self.compute_overlay:
+                # display current run
+                if run_bounds is not None:
+                    lx1 = int( run_x1 )
+                    lx2 = int( run_x2 )
+                    run_color = (0, f_contrast, 255)  # red=low contrast, yellow=full contrast
+                    cv2.line(self.overlay, (lx1, y1), (lx2, y1), run_color, 1)
                 # display the curve at the bottom of the SR rect
                 if y1 == sr.y + sr.h - 1:
                     self.draw_rect(sr,    (  0, 255, 0), width=1)
