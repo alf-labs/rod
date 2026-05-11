@@ -9,10 +9,10 @@ from process_coupler import ROI_WIDTH_PCT, QUALITY_THRESHOLD
 from rod_result import RodResult
 
 SEARCH_WIDTH_PCT = 3
-# Rod top/bot for 1280 samples: 15,40,/1280
-# Rod top/bot for 4k videos   : 20,70,/1280
-ROD_W_TOP = 15 / 1280   # Minimum rod size that must be > 80% luma noise.
-ROD_W_BOT = 40 / 1280   # Maximum rod size that must be > 80% luma noise.
+# Rod top/bot for 1280 samples: --rod-widths 15,40,/1280
+# Rod top/bot for 4k videos   : --rod-widths 20,80,/1280
+ROD_W_TOP = 20 / 1280   # Minimum rod size that must be > 80% luma noise.
+ROD_W_BOT = 80 / 1280   # Maximum rod size that must be > 80% luma noise.
 
 class RodDetector(ProcessorBase):
     def __init__(self, coupler_tracker, rod_widths_str):
@@ -76,8 +76,6 @@ class RodDetector(ProcessorBase):
         if self.compute_overlay:
             srect = self.get_search_window(cr)
             self.draw_rect(srect, (255, 255, 0))
-
-        if self.compute_overlay:
             self.draw_rect(cr,    (255, 128, 0))
 
         has_result = frame_index in self.rods

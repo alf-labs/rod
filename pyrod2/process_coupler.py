@@ -9,7 +9,8 @@ from coupler_result import CouplerResult
 from coupler_template import CouplerTemplate
 
 ROI_WIDTH_PCT = 1/3
-QUALITY_THRESHOLD = 0.1
+QUALITY_THRESHOLD = 0.07
+SEARCH_HEIGHT_MULTIPLER = 5    # times template height
 
 class CouplerTracker(ProcessorBase):
     def __init__(self, start_frame):
@@ -162,11 +163,14 @@ class CouplerTracker(ProcessorBase):
         template_rect = self.current_template.rect
         w = int(ROI_WIDTH_PCT * width)
         if self.roi_rect is None:
-            y = template_rect.y - template_rect.h
+            c = template_rect.center()
+            h = int(template_rect.h * SEARCH_HEIGHT_MULTIPLER)
+            # bias search window towards the bottom
+            y = int(c[1] - h // 2 + template_rect.h )
         else:
             y = self.roi_rect.y
+            h = self.roi_rect.h
         x = int(self.roi_center - w // 2)
-        h = height - y
         if x < 0:
             x = 0
         elif x + w >= width:
