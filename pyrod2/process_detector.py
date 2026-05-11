@@ -30,7 +30,7 @@ class RodDetector(ProcessorBase):
     def parse_rod_widths_str(self, rod_widths_str):
         pattern = r"(?P<top>\d+),(?P<bot>\d+),/(?P<width>\d+)"
         match = re.search(pattern, rod_widths_str)
-        assert match is not None, "Expected syntax: 'top,bottom,/width', e.g. '15,40,/1280'"
+        assert match is not None, f"Expected syntax: 'top,bottom,/width', e.g. '15,40,/1280', but was '{rod_widths_str}'"
         _top = int(match.group("top"))
         _bot = int(match.group("bot"))
         _width = int(match.group("width"))
@@ -90,7 +90,7 @@ class RodDetector(ProcessorBase):
             # print(f"@@ [{frame_index:04d}] Reuse ROD {result}")
 
         if self.compute_overlay and result is not None:
-            self.draw_rod_outline(srect, result, (0, 165, 255), width=1)
+            self.draw_rod_outline(srect, result, (255, 255, 0), width=2)
 
         # # For debug purposes, we display any changes made to the LU image.
         # frame = cv2.cvtColor(lu, cv2.COLOR_GRAY2BGR)
@@ -175,16 +175,18 @@ class RodDetector(ProcessorBase):
     def search_poly_rod(self, frame_index, w, h, lu, cr):
         """Experiment 2: Reimplement the old pixel-based Lua search but with a numpy take."""
 
-        # SR: The actual search rect. It's located just below the coupler area (cr)
+        # CR: The current coupler rect.
+        # SR: A rectangle used for debug display to display the luma curve and the thresholds.
         sr = cr.copy()
         sr.move_by(0, cr.h)
         sr.scale_by(SEARCH_WIDTH_PCT, 1.0)
 
         x1 = sr.x
         x2 = sr.x + sr.w
-        yt = sr.y
+        # Y top of the rod is just at below the current coupler rect.
+        yt = cr.y + cr.h
+        # Y bottom of the rod is bottom of the screen.
         yb = h
-        y_half = (yt + yb) // 2
         # we'll search for the rod close to the center at first.
         # TBD: reuse data from the last frame as it should be "close by".
         ideal_rod_w = self.rod_w_top
@@ -192,6 +194,10 @@ class RodDetector(ProcessorBase):
         rod_center = initial_rod_center
         # rod_bounds is (0=y, 1=xcenter, 2=width, 3=xleft, 4=xright). Remove later what we don't need.
         rod_bounds = ( yt, rod_center, ideal_rod_w, int(rod_center - ideal_rod_w / 2), int(rod_center + ideal_rod_w / 2) )
+
+        # For debug, we'll display a series of stacked rectangles (sr), showing the luma curve from the bottom y of that rect.
+        # We want it aligned with the bottom of the search area.
+        sr.y = yb - sr.h * int(math.ceil((yb - yt) / sr.h))
 
         all_bounds = []
         for y1 in range(yt, yb):
@@ -208,6 +214,7 @@ class RodDetector(ProcessorBase):
             # Select everything that is higher than the 80th percentile.
             f_threshold = np.percentile(y_lu_u8, 80)
             selected_01 = (y_lu_u8 >= f_threshold).astype(np.uint8)
+            # print(f"@@ DEBUG [{frame_index:04d} : {y1:3d}]")
             run_bounds = self.select_best_run(selected_01, self.rod_w_top, self.rod_w_bot, rod_center - x1, ideal_rod_w)
 
             if run_bounds is not None:
@@ -268,8 +275,8 @@ class RodDetector(ProcessorBase):
         # Identify which runs to keep
         valid_indices = np.where((lengths >= min_size) & (lengths <= max_size))[0]
 
-        target_x1 = rod_center - ideal_rod_w / 2
-        target_x2 = rod_center + ideal_rod_w / 2
+        target_x1 = int(rod_center - ideal_rod_w / 2)
+        target_x2 = int(rod_center + ideal_rod_w / 2)
         best_score = 0
         selected_bounds = None  # None or ( x1, x2 )
 
@@ -280,10 +287,12 @@ class RodDetector(ProcessorBase):
 
             # the score is the IoU of this segment vs the target
             score = self.iou(x1, x2, target_x1, target_x2)
+            # print(f"@@             segment [{x1:3d}:{x2:3d}] vs target [{target_x1:3d}:{target_x2:3d}] >> iou {score} ")
             if score > best_score:
                 best_score = score
                 selected_bounds = ( int(x1), int(x2) )
 
+        # print(f"@@                 min {min_size}, max {max_size}, lengths {lengths} >> valid {valid_indices} >> selected {selected_bounds}")
         return selected_bounds
 
     def iou(self, ax1, ax2, bx1, bx2):

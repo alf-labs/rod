@@ -21,7 +21,7 @@ try:
     import scipy
     from flask import Flask, render_template, Response, request, jsonify
     from process_coupler import CouplerTracker
-    from process_detector import RodDetector
+    from process_detector import RodDetector, ROD_W_TOP, ROD_W_BOT
     from process_inpainter import ProcessInpainter, ROD_DILATE_PX, ROD_BLUR_PX
 except ModuleNotFoundError as e:
     print(f"ERROR: Missing library. {e}")
@@ -96,7 +96,8 @@ class Main:
         parser.add_argument("-1", "--detector-only", action="store_true", help="Only run rod detector process")
         parser.add_argument(      "--load-json", default="", help="JSON data to read back")
 
-        parser.add_argument(      "--rod-widths", default="15,40,/1280", help="Detector Rod size top vs bottom")
+        rw_def = f"{int(ROD_W_TOP*1280)},{int(ROD_W_BOT*1280)},/1280"
+        parser.add_argument(      "--rod-widths", default=rw_def, help="Detector Rod size top vs bottom")
         parser.add_argument("-p", "--inpaint", default="left", choices=["left", "right", "mix", "none"], help="Inpaint algorithm")
         parser.add_argument(      "--rod-dilate-px", type=int, default=ROD_DILATE_PX, help="Dilate filter kernel after rod detection")
         parser.add_argument(      "--rod-blur-px", type=int, default=ROD_BLUR_PX, help="Blur filter kernel after rod detection")
