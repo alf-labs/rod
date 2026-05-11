@@ -35,13 +35,13 @@ class RodDetector(ProcessorBase):
         global ROD_W_TOP, ROD_W_BOT
         ROD_W_TOP = _top / _width
         ROD_W_BOT = _bot / _width
-        print(f"@@ Rod Widths args: {ROD_W_TOP} to {ROD_W_BOT}")
 
     def init_size(self, width, height):
         super().init_size(width, height)
         self.roi_center = width / 2
         self.rod_w_top = int(ROD_W_TOP * width)
         self.rod_w_bot = int(ROD_W_BOT * width)
+        print(f"@@ Rod Widths: {self.rod_w_top} to {self.rod_w_bot}")
 
     def init_overlay(self, frame):
         super().init_overlay(frame)

@@ -8,7 +8,7 @@ from process_coupler import QUALITY_THRESHOLD
 ROI_WIDTH_PCT = 1/2
 ROD_BLUR_PY = 40/720
 COUPLER_MULTIPLER = 4
-ROD_DILATE_PX = 5
+ROD_DILATE_PX = 10
 ROD_BLUR_PX = 21
 
 class ProcessInpainter(ProcessorBase):
@@ -21,14 +21,14 @@ class ProcessInpainter(ProcessorBase):
         self.current_template = None
         self.roi_rect = None
         self.view_mask = inpainting is None
+        self.rod_dilate_px = rod_dilate_px
+        self.rod_blur_px = rod_blur_px
         self.inpaint_method = {
             "left":   self.inpaint_poly_left,
             "right":  self.inpaint_poly_right,
             "mix":    self.inpaint_poly_mix,
             "none":   self.inpaint_noop,
         }.get(inpainting, None)
-        self.rod_dilate_kernel = np.ones((3, rod_dilate_px), np.uint8)
-        self.rod_blur_ksize = (rod_blur_px, 3)
         self.rod_h_top = None
         print(f"@@ Inpainter method: {self.inpaint_method}")
 
@@ -38,7 +38,8 @@ class ProcessInpainter(ProcessorBase):
         self.roi_center = width / 2
         self.rod_blur_py = int(ROD_BLUR_PY * height)
         print(f"Inpainter: Rod blur height {self.rod_blur_py} px")
-        self.rod_blend_x_u16 = self.smoothstep(ROD_BLUR_PX)
+        self.rod_blend_x_u16 = self.smoothstep(self.rod_blur_px)
+        print(f"@@ Inpainter view_mask: {self.view_mask}")
 
     def init_overlay(self, frame):
         super().init_overlay(frame)
@@ -128,13 +129,13 @@ class ProcessInpainter(ProcessorBase):
         self._draw_poly(x1s, ys, (0, 255, 255))
         self._draw_poly(x2s, ys, (0, 255, 255))
 
-        x1s -= ROD_DILATE_PX
-        x2s += ROD_DILATE_PX
+        x1s -= self.rod_dilate_px
+        x2s += self.rod_dilate_px
         self._draw_poly(x1s, ys, (0, 0, 255))
         self._draw_poly(x2s, ys, (0, 0, 255))
 
-        x1s -= ROD_BLUR_PX
-        x2s += ROD_BLUR_PX
+        x1s -= self.rod_blur_px
+        x2s += self.rod_blur_px
         self._draw_poly(x1s, ys, (0, 255, 0))
         self._draw_poly(x2s, ys, (0, 255, 0))
 
@@ -204,10 +205,10 @@ class ProcessInpainter(ProcessorBase):
         # x0 --> blend (w0) --> x1 (left) --> full (w1) --> x2 (right) --> blend (w2) --> x3
         # Left  algorithm: no blend on left (x0..x1), blend on the right (x2..x3)
         # Right algorithm: blend on the left (x0..x1), no blend on right (x2..x3), only
-        x1 = int(lc - lw / 2) - ROD_DILATE_PX
-        x2 = int(lc + lw / 2) + ROD_DILATE_PX
-        x0 = x1 - ROD_BLUR_PX
-        x3 = x2 + ROD_BLUR_PX
+        x1 = int(lc - lw / 2) - self.rod_dilate_px
+        x2 = int(lc + lw / 2) + self.rod_dilate_px
+        x0 = x1 - self.rod_blur_px
+        x3 = x2 + self.rod_blur_px
         w0 = x1 - x0
         w1 = x2 - x1
         w2 = x3 - x2
@@ -234,10 +235,10 @@ class ProcessInpainter(ProcessorBase):
         # x0 --> blend (w0) --> x1 (left) --> full (w1) --> x2 (right) --> blend (w2) --> x3
         # Left  algorithm: no blend on left (x0..x1), blend on the right (x2..x3)
         # Right algorithm: blend on the left (x0..x1), no blend on right (x2..x3), only
-        x1 = int(lc - lw / 2) - ROD_DILATE_PX
-        x2 = int(lc + lw / 2) + ROD_DILATE_PX
-        x0 = x1 - ROD_BLUR_PX
-        x3 = x2 + ROD_BLUR_PX
+        x1 = int(lc - lw / 2) - self.rod_dilate_px
+        x2 = int(lc + lw / 2) + self.rod_dilate_px
+        x0 = x1 - self.rod_blur_px
+        x3 = x2 + self.rod_blur_px
         w0 = x1 - x0
         w1 = x2 - x1
         w2 = x3 - x2
@@ -264,10 +265,10 @@ class ProcessInpainter(ProcessorBase):
         # x0 --> blend (w0) --> x1 (left) --> full (w1) --> x2 (right) --> blend (w2) --> x3
         # Left  algorithm: no blend on left (x0..x1), blend on the right (x2..x3)
         # Right algorithm: blend on the left (x0..x1), no blend on right (x2..x3), only
-        x1 = int(lc - lw / 2) - ROD_DILATE_PX
-        x2 = int(lc + lw / 2) + ROD_DILATE_PX
-        x0 = x1 - ROD_BLUR_PX
-        x3 = x2 + ROD_BLUR_PX
+        x1 = int(lc - lw / 2) - self.rod_dilate_px
+        x2 = int(lc + lw / 2) + self.rod_dilate_px
+        x0 = x1 - self.rod_blur_px
+        x3 = x2 + self.rod_blur_px
         w0 = x1 - x0
         w1 = x2 - x1
         w2 = x3 - x2
