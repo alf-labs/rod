@@ -78,6 +78,7 @@ class ProcessInpainter(ProcessorBase):
         roi_rgb = frame[ry1 : ry2, rx1 : rx2]
 
         if self.inpaint_method:
+            # print(f"@@ ----- frame [{frame_index:04d}] ------")
             inpainted = self.inpaint_method(roi_rect, roi_rgb, rod)
             frame[ry1 : ry2, rx1 : rx2] = inpainted
 
@@ -99,7 +100,7 @@ class ProcessInpainter(ProcessorBase):
             y = self.roi_rect.y
         x = int(self.roi_center - w // 2)
         h = height - y
-        self.roi_center = self.roi_center * 0.9 + c[0] * 0.1
+        self.roi_center = self.roi_center * 0.25 + c[0] * 0.75
         if x < 0:
             x = 0
         elif x + w >= width:
@@ -189,6 +190,7 @@ class ProcessInpainter(ProcessorBase):
                 ly = y1 - ry1
                 if coef < 256:
                     org_row_u16 = roi_rgb[ly, :].copy().astype(np.uint16)
+                # print(f"@@ -----     y [{y1: 3d}] ------")
                 method(lc1, lw, ly, roi_rgb)
                 if coef < 256:
                     new_row_u16 = roi_rgb[ly, :].astype(np.uint16)
@@ -223,7 +225,7 @@ class ProcessInpainter(ProcessorBase):
         src_row_u16 = rgb_row[x1 - w1 : x1 - w1 - w2 : -1, :].astype(np.uint16)
         dst_row_u16 = rgb_row[x2 : x3].astype(np.uint16)
         blend_u16 = self.rod_blend_x_u16
-        # print(f"@@ x1 {x1} > x2 {x2} + {w2} > x3 {x3} -- coef {coef} -- rgb {rgb_row.shape}, src {src_row_u16.shape}, dst {dst_row_u16.shape}, blend {blend_u16.shape}")
+        # print(f"@@ lc {lc}, lw {lw}, x0 {x0} + {w0} > x1 {x1} + {w1} > x2 {x2} + {w2} > x3 {x3} -- rgb {rgb_row.shape}, src {src_row_u16.shape}, dst {dst_row_u16.shape}, blend {blend_u16.shape}")
         blended = (
                   dst_row_u16 * blend_u16[:   , np.newaxis]
                 + src_row_u16 * blend_u16[::-1, np.newaxis]
@@ -253,7 +255,7 @@ class ProcessInpainter(ProcessorBase):
         src_row_u16 = rgb_row[x2 + w1 + w0 : x2 + w1 : -1, :].astype(np.uint16)
         dst_row_u16 = rgb_row[x0 : x1].astype(np.uint16)
         blend_u16 = self.rod_blend_x_u16
-        # print(f"@@ x1 {x1} > x2 {x2} + {w2} > x3 {x3} -- coef {coef} -- rgb {rgb_row.shape}, src {src_row_u16.shape}, dst {dst_row_u16.shape}, blend {blend_u16.shape}")
+        # print(f"@@ lc {lc}, lw {lw}, x0 {x0} + {w0} > x1 {x1} + {w1} > x2 {x2} + {w2} > x3 {x3} -- rgb {rgb_row.shape}, src {src_row_u16.shape}, dst {dst_row_u16.shape}, blend {blend_u16.shape}")
         blended = (
                   dst_row_u16 * blend_u16[::-1, np.newaxis]
                 + src_row_u16 * blend_u16[:   , np.newaxis]
@@ -286,7 +288,6 @@ class ProcessInpainter(ProcessorBase):
         src_row_u16 = rgb_row[x1 - w1 : x1 - w1 - w2 : -1, :].astype(np.uint16)
         dst_row_u16 = rgb_row[x2 : x3].astype(np.uint16)
         blend_u16 = self.rod_blend_x_u16
-        # print(f"@@ x1 {x1} > x2 {x2} + {w2} > x3 {x3} -- coef {coef} -- rgb {rgb_row.shape}, src {src_row_u16.shape}, dst {dst_row_u16.shape}, blend {blend_u16.shape}")
         blended = (
                   dst_row_u16 * blend_u16[:   , np.newaxis]
                 + src_row_u16 * blend_u16[::-1, np.newaxis]
@@ -297,7 +298,6 @@ class ProcessInpainter(ProcessorBase):
         src_row_u16 = rgb_row[x2 + w1 + w0 : x2 + w1 : -1, :].astype(np.uint16)
         dst_row_u16 = rgb_row[x0 : x1].astype(np.uint16)
         blend_u16 = self.rod_blend_x_u16
-        # print(f"@@ x1 {x1} > x2 {x2} + {w2} > x3 {x3} -- coef {coef} -- rgb {rgb_row.shape}, src {src_row_u16.shape}, dst {dst_row_u16.shape}, blend {blend_u16.shape}")
         blended = (
                   dst_row_u16 * blend_u16[::-1, np.newaxis]
                 + src_row_u16 * blend_u16[:   , np.newaxis]
