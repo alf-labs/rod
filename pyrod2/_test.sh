@@ -2,9 +2,7 @@
 
 A="$1" ; shift
 
-LATEST_JSON=$( ls -1 --sort=time output/*.json | head -n 1 )
-ARGS="--display=full --overlay-video --locator-rod-sz=30,15,50,/1280"
-ARGS="--display=full --overlay-video"
+ARGS="--display=full --overlay-video --rod-widths 15,40,/1280"
 
 mkdir -p output
 
@@ -31,7 +29,7 @@ elif [[ "$A" == "0p1" ]]; then
 elif [[ "$A" == "0p2" ]]; then
     LATEST_JSON=$( ls -1 --sort=time output/b_*.json | head -n 1 )
     ( set -x
-    time ./_run.sh -2 --load-json "$LATEST_JSON" -o output/c_TIME.mp4 --display=full $ARGS $@
+    time ./_run.sh --load-json "$LATEST_JSON" --no-json -o output/c_TIME.mp4 --display=full $ARGS $@
     )
 else
     echo "@@ Missing test argument."

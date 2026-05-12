@@ -5,7 +5,7 @@ from rect import Rect
 from processor import ProcessorBase
 from process_coupler import QUALITY_THRESHOLD
 
-ROI_WIDTH_PCT = 1/2
+ROI_WIDTH_PCT = 1
 ROD_BLUR_PY = 40/720
 COUPLER_MULTIPLER = 4
 ROD_DILATE_PX = 10
@@ -78,8 +78,11 @@ class ProcessInpainter(ProcessorBase):
         roi_rgb = frame[ry1 : ry2, rx1 : rx2]
 
         if self.inpaint_method:
-            # print(f"@@ ----- frame [{frame_index:04d}] ------")
-            inpainted = self.inpaint_method(roi_rect, roi_rgb, rod)
+            try:
+                inpainted = self.inpaint_method(roi_rect, roi_rgb, rod)
+            except Exception as e:
+                print(f"@@ ----- ERROR AT frame [{frame_index:04d}]")
+                raise
             frame[ry1 : ry2, rx1 : rx2] = inpainted
 
         if self.view_mask and self.compute_overlay:
@@ -175,45 +178,56 @@ class ProcessInpainter(ProcessorBase):
         for y1 in range(ry_top, ry2):
             lc = rod.poly_c(y1) - rx1
             lw = rod.poly_w(y1)
-            method(lc, lw, y1 - ry1, roi_rgb)
+            try:
+                method(lc, lw, y1 - ry1, roi_rgb)
+            except Exception as e:
+                print(f"@@ ----- ERROR AT y [{y1:3d}], lc {int(lc)}, lw {int(lw)}, ly {y1 - ry1}, roi_rgb shape {roi_rgb.shape}")
+                raise
 
-        py = self.rod_blur_py
-        if py > 0:
-            lc1 = rod.poly_c(ry_top) - rx1
-            lw1 = rod.poly_w(ry_top)
-            for y1 in range(ry_top - py, ry_top):
-                t = (ry_top - y1) / py  # from 1 (top) to 0 (bottom, by ry_top)
-                coef = int(256 - t * 256)
-                if coef <= 0:
-                    continue
-                lw = lw1 + lw1 * COUPLER_MULTIPLER * t
-                ly = y1 - ry1
-                if coef < 256:
-                    org_row_u16 = roi_rgb[ly, :].copy().astype(np.uint16)
-                # print(f"@@ -----     y [{y1: 3d}] ------")
-                method(lc1, lw, ly, roi_rgb)
-                if coef < 256:
-                    new_row_u16 = roi_rgb[ly, :].astype(np.uint16)
-                    blended = (
-                        new_row_u16 * coef
-                        + org_row_u16 * (256 - coef)
-                    ) / 256
-                    roi_rgb[ly, :] = blended.astype(np.uint8)
+        # Skip coupler blending for now. We want to revisit the strategy.
+        # py = self.rod_blur_py
+        # if py > 0:
+        #     lc1 = rod.poly_c(ry_top) - rx1
+        #     lw1 = rod.poly_w(ry_top)
+        #     for y1 in range(ry_top - py, ry_top):
+        #         t = (ry_top - y1) / py  # from 1 (top) to 0 (bottom, by ry_top)
+        #         coef = int(256 - t * 256)
+        #         if coef <= 0:
+        #             continue
+        #         lw = lw1 + lw1 * COUPLER_MULTIPLER * t
+        #         ly = y1 - ry1
+        #         if coef < 256:
+        #             org_row_u16 = roi_rgb[ly, :].copy().astype(np.uint16)
+        #         method(lc1, lw, ly, roi_rgb)
+        #         if coef < 256:
+        #             new_row_u16 = roi_rgb[ly, :].astype(np.uint16)
+        #             blended = (
+        #                 new_row_u16 * coef
+        #                 + org_row_u16 * (256 - coef)
+        #             ) / 256
+        #             roi_rgb[ly, :] = blended.astype(np.uint8)
 
         return roi_rgb
 
     def _left_merge(self, lc, lw, ly, roi_rgb):
+        h, w = roi_rgb.shape[:2]
         # X values:
         # x0 --> blend (w0) --> x1 (left) --> full (w1) --> x2 (right) --> blend (w2) --> x3
         # Left  algorithm: no blend on left (x0..x1), blend on the right (x2..x3)
         # Right algorithm: blend on the left (x0..x1), no blend on right (x2..x3), only
         x1 = int(lc - lw / 2) - self.rod_dilate_px
         x2 = int(lc + lw / 2) + self.rod_dilate_px
-        x0 = x1 - self.rod_blur_px
+        # x0 = x1 - self.rod_blur_px    # not used for left merge
         x3 = x2 + self.rod_blur_px
-        w0 = x1 - x0
+        # w0 = x1 - x0                  # not used for left merge
         w1 = x2 - x1
         w2 = x3 - x2
+
+        # Sanity check.
+        if lw < 2: return
+        if x1 < 0: return
+        if x1 - w1 - w2 < 0: return
+        if x3 >= w: return
 
         rgb_row = roi_rgb[ly, :]
 
@@ -233,6 +247,7 @@ class ProcessInpainter(ProcessorBase):
         rgb_row[x2 : x3] = blended.astype(np.uint8)
 
     def _right_merge(self, lc, lw, ly, roi_rgb):
+        h, w = roi_rgb.shape[:2]
         # X values:
         # x0 --> blend (w0) --> x1 (left) --> full (w1) --> x2 (right) --> blend (w2) --> x3
         # Left  algorithm: no blend on left (x0..x1), blend on the right (x2..x3)
@@ -240,10 +255,16 @@ class ProcessInpainter(ProcessorBase):
         x1 = int(lc - lw / 2) - self.rod_dilate_px
         x2 = int(lc + lw / 2) + self.rod_dilate_px
         x0 = x1 - self.rod_blur_px
-        x3 = x2 + self.rod_blur_px
+        # x3 = x2 + self.rod_blur_px    # not used for right merge
         w0 = x1 - x0
         w1 = x2 - x1
-        w2 = x3 - x2
+        # w2 = x3 - x2                  # not used for right merge
+
+        # Sanity check.
+        if lw < 2: return
+        if x0 < 0: return
+        if x2 >= w: return
+        if x2 + w1 + w0 >= w: return
 
         rgb_row = roi_rgb[ly, :]
 
@@ -263,6 +284,7 @@ class ProcessInpainter(ProcessorBase):
         rgb_row[x0 : x1] = blended.astype(np.uint8)
 
     def _mixed_merge(self, lc, lw, ly, roi_rgb):
+        h, w = roi_rgb.shape[:2]
         # X values:
         # x0 --> blend (w0) --> x1 (left) --> full (w1) --> x2 (right) --> blend (w2) --> x3
         # Left  algorithm: no blend on left (x0..x1), blend on the right (x2..x3)
@@ -274,6 +296,13 @@ class ProcessInpainter(ProcessorBase):
         w0 = x1 - x0
         w1 = x2 - x1
         w2 = x3 - x2
+
+        # Sanity check.
+        if lw < 2: return
+        if x0 < 0: return
+        if x1 - w1 - w2 < 0: return
+        if x2 + w1 + w0 >= w: return
+        if x3 >= w: return
 
         # We need to copy the source in order to not read what we just overwrote
         rgb_row = roi_rgb[ly, :].copy()
