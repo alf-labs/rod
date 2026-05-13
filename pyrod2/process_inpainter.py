@@ -8,8 +8,11 @@ from process_coupler import QUALITY_THRESHOLD
 ROI_WIDTH_PCT = 1
 ROD_BLUR_PY = 40/720
 COUPLER_MULTIPLER = 4
+COUPLER_LUMA_REDUCTION = 0.25
 ROD_DILATE_PX = 10
 ROD_BLUR_PX = 21
+COUPLER_MASK_KERNEL = np.ones((11, 11), np.uint8)
+COUPLER_MASK_BLUR = 21
 
 class ProcessInpainter(ProcessorBase):
     def __init__(self, coupler_tracker, rod_detector, inpainting="left", rod_dilate_px=ROD_DILATE_PX, rod_blur_px=ROD_BLUR_PX):
@@ -80,6 +83,7 @@ class ProcessInpainter(ProcessorBase):
         if self.inpaint_method:
             try:
                 inpainted = self.inpaint_method(roi_rect, roi_rgb, rod)
+                inpainted = self.inpaint_coupler(roi_rect, inpainted, rod, cr)
             except Exception as e:
                 print(f"@@ ----- ERROR AT frame [{frame_index:04d}]")
                 raise
@@ -332,3 +336,55 @@ class ProcessInpainter(ProcessorBase):
                 + src_row_u16 * blend_u16[:   , np.newaxis]
             ) // 256
         roi_rgb[ly, x0 : x1] = blended.astype(np.uint8)
+
+    def inpaint_coupler(self, roi_rect, roi_rgb, rod, coupler_rect):
+        # Convert coupler_rect to roi_rect coordinates
+        cx1 = coupler_rect.x - roi_rect.x - COUPLER_MASK_BLUR
+        cy1 = coupler_rect.y - roi_rect.y - COUPLER_MASK_BLUR
+        cx2 = cx1 + coupler_rect.w + 2 * COUPLER_MASK_BLUR
+        cy2 = cy1 + coupler_rect.h + COUPLER_MASK_BLUR
+
+        coupler_rgb = roi_rgb[cy1 : cy2, cx1 : cx2]
+        h, w = coupler_rgb.shape[:2]
+        coupler_lab = cv2.cvtColor(coupler_rgb, cv2.COLOR_BGR2LAB)
+        coupler_lu = coupler_lab[:, :, 0].copy()
+
+        row_lu = coupler_lu[-1, : ]
+        l_min = np.min(row_lu)
+        l_max = np.max(row_lu)
+        l_threshold = np.median(row_lu)
+
+        # print(f"@@ Coupler ROI: {cx1} + {w} : {cx2}, {cy1} + {h} : {cy2}, l_min {l_min}, l_threshold {l_threshold}, l_max {l_max}, coupler_lu {coupler_lu.shape}")
+
+        mask1 = np.zeros((h + 2, w + 2), np.uint8)
+        mask1[0 : COUPLER_MASK_BLUR+1, : ] = 1
+        mask1[ : , 0 : COUPLER_MASK_BLUR+1] = 1
+        mask1[ : , -1 * (COUPLER_MASK_BLUR+1)] = 1
+
+        _, _, mask, _ = cv2.floodFill(
+            image=coupler_lu,
+            mask=mask1.copy(),
+            seedPoint=(w // 2, h - 1),
+            newVal=0,
+            loDiff=int((l_max - l_threshold) * .75),
+            upDiff=l_max - l_threshold,
+            flags=4 + cv2.FLOODFILL_MASK_ONLY + cv2.FLOODFILL_FIXED_RANGE)
+
+        mask -= mask1
+        mask = mask[ 1:-1, 1:-1 ].astype(np.float32)
+
+        mask = cv2.dilate(mask, COUPLER_MASK_KERNEL, iterations=1)
+        mask = cv2.GaussianBlur(mask, (COUPLER_MASK_BLUR, COUPLER_MASK_BLUR), 0)
+
+        src_lu_f32 = coupler_lu.astype(np.float32)
+        cap_lu_f32 = np.minimum(src_lu_f32, (l_max + l_threshold) * COUPLER_LUMA_REDUCTION)
+        # cap_lu_f32 = mask * 255     # for debugging mask dilate/blur
+
+        # result = source * (1 - mask) + capped * mask
+        # This can be simplified to: source + mask * (capped - source)
+        dst_lu_f32 = src_lu_f32 + mask * (cap_lu_f32 - src_lu_f32)
+        coupler_lu = np.clip(dst_lu_f32, 0, 255).astype(np.uint8)
+        coupler_lab[:, :, 0] = coupler_lu
+
+        roi_rgb[cy1 : cy2, cx1 : cx2] = cv2.cvtColor(coupler_lab, cv2.COLOR_LAB2BGR)
+        return roi_rgb
