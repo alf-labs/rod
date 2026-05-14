@@ -59,8 +59,10 @@ class ProcessInpainter(ProcessorBase):
         h, w = frame.shape[:2]
         coupler = self.coupler_tracker.couplers[frame_index]
         rod = self.rod_detector.rods[frame_index]
-        if rod is None or coupler is None or coupler.quality < QUALITY_THRESHOLD:
+        if rod is None or coupler is None:
             return frame
+        # if coupler.quality < QUALITY_THRESHOLD:
+        #     return frame
 
         if self.current_template is None:
             self.current_template = self.coupler_tracker.tracker_templates[coupler.coupler_ref]
@@ -102,7 +104,7 @@ class ProcessInpainter(ProcessorBase):
         c = coupler_rect.center()
         w = int(ROI_WIDTH_PCT * width)
         if self.roi_rect is None:
-            y = coupler_rect.y - coupler_rect.h
+            y = coupler_rect.y - coupler_rect.h - COUPLER_MASK_BLUR
         else:
             y = self.roi_rect.y
         x = int(self.roi_center - w // 2)
@@ -346,6 +348,7 @@ class ProcessInpainter(ProcessorBase):
 
         coupler_rgb = roi_rgb[cy1 : cy2, cx1 : cx2]
         h, w = coupler_rgb.shape[:2]
+        # print(f"@@ Coupler {coupler_rect} -- ROI[{roi_rect} in {roi_rgb.shape}] : {cx1} + {w} : {cx2}, {cy1} + {h} : {cy2}")
         coupler_lab = cv2.cvtColor(coupler_rgb, cv2.COLOR_BGR2LAB)
         coupler_lu = coupler_lab[:, :, 0].copy()
 
