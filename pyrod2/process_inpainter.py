@@ -61,6 +61,7 @@ class ProcessInpainter(ProcessorBase):
         rod = self.rod_detector.rods[frame_index]
         if rod is None or coupler is None:
             return frame
+        # Do not skip the interpolated frames of low coupler quality. They are still mostly useful.
         # if coupler.quality < QUALITY_THRESHOLD:
         #     return frame
 
@@ -84,8 +85,8 @@ class ProcessInpainter(ProcessorBase):
 
         if self.inpaint_method:
             try:
-                inpainted = self.inpaint_method(roi_rect, roi_rgb, rod)
-                inpainted = self.inpaint_coupler(roi_rect, inpainted, rod, cr)
+                inpainted = self.inpaint_coupler(roi_rect, roi_rgb, rod, cr)
+                inpainted = self.inpaint_method(roi_rect, inpainted, rod)
             except Exception as e:
                 print(f"@@ ----- ERROR AT frame [{frame_index:04d}]")
                 raise
@@ -189,29 +190,6 @@ class ProcessInpainter(ProcessorBase):
             except Exception as e:
                 print(f"@@ ----- ERROR AT y [{y1:3d}], lc {int(lc)}, lw {int(lw)}, ly {y1 - ry1}, roi_rgb shape {roi_rgb.shape}")
                 raise
-
-        # Skip coupler blending for now. We want to revisit the strategy.
-        # py = self.rod_blur_py
-        # if py > 0:
-        #     lc1 = rod.poly_c(ry_top) - rx1
-        #     lw1 = rod.poly_w(ry_top)
-        #     for y1 in range(ry_top - py, ry_top):
-        #         t = (ry_top - y1) / py  # from 1 (top) to 0 (bottom, by ry_top)
-        #         coef = int(256 - t * 256)
-        #         if coef <= 0:
-        #             continue
-        #         lw = lw1 + lw1 * COUPLER_MULTIPLER * t
-        #         ly = y1 - ry1
-        #         if coef < 256:
-        #             org_row_u16 = roi_rgb[ly, :].copy().astype(np.uint16)
-        #         method(lc1, lw, ly, roi_rgb)
-        #         if coef < 256:
-        #             new_row_u16 = roi_rgb[ly, :].astype(np.uint16)
-        #             blended = (
-        #                 new_row_u16 * coef
-        #                 + org_row_u16 * (256 - coef)
-        #             ) / 256
-        #             roi_rgb[ly, :] = blended.astype(np.uint8)
 
         return roi_rgb
 
