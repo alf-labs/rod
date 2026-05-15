@@ -365,6 +365,7 @@ class Main:
             last_frame = None
             end_reached = False
             frame_count = self.start_frame
+            frame_index = frame_count
             do_downscale = 1  # can be either 1 or 2
             print(f"@@ Reader cap isOpened: {cap.isOpened()}, {width}x{height}@{fps} fps")
             cap.set(cv2.CAP_PROP_POS_FRAMES, self.start_frame)
@@ -390,6 +391,7 @@ class Main:
                         if processor is not None:
                             init_once = True
                             frame_count = self.start_frame
+                            frame_index = frame_count
                             width = cropped_width
                             height = cropped_height
                             self.paused = False
@@ -409,6 +411,9 @@ class Main:
                         frame = frame[crop_y1:crop_y2, crop_x1:crop_x2]
                     if do_downscale == 2:
                         frame = cv2.pyrDown(frame) # downscale by a fixed 2x factor
+                    frame_count += 1
+                    if self.end_frame > 0 and self.end_frame == frame_count:
+                        end_reached = True
                     last_frame = frame.copy()
 
                 _skip_num = self.skip_num
@@ -421,14 +426,14 @@ class Main:
                     if do_crop:
                         cv2.rectangle(processor.overlay, (0, 0), (cropped_width - 1, cropped_height - 1), (0,0,0), 1)
 
-                    result = processor.filter(filter_window_info, frame_count, frame)
+                    result = processor.filter(filter_window_info, frame_index, frame)
 
                     if processor.select_roi_invoked and mouse_callback:
                         # cv2.selectROI changes the mouse callback so we need to restore it
                         cv2.setMouseCallback(WINDOW_TITLE, mouse_callback)
                         processor.select_roi_invoked = False
 
-                    self.print_fps(loop_s, frame_count, processor.overlay)
+                    self.print_fps(loop_s, frame_index, processor.overlay)
 
                 original_frame = result
                 overlaid_frame = None
@@ -466,11 +471,7 @@ class Main:
                     processor.trigger_pause = False
                     self.paused = True
 
-                if not self.paused:
-                    frame_count += 1
-                    if self.end_frame > 0 and self.end_frame == frame_count:
-                        end_reached = True
-
+                frame_index = frame_count
                 end_loop_s = time.perf_counter()
                 loop_s = end_loop_s - start_loop_s
 
