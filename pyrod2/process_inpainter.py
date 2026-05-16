@@ -326,7 +326,7 @@ class ProcessInpainter(ProcessorBase):
 
         coupler_rgb = roi_rgb[cy1 : cy2, cx1 : cx2]
         h, w = coupler_rgb.shape[:2]
-        # print(f"@@ Coupler {coupler_rect} -- ROI[{roi_rect} in {roi_rgb.shape}] : {cx1} + {w} : {cx2}, {cy1} + {h} : {cy2}")
+        # print(f"@@ Coupler rgb {coupler_rgb.shape}, rect {coupler_rect} -- ROI[{roi_rect} in {roi_rgb.shape}] : {cx1} + {w} : {cx2}, {cy1} + {h} : {cy2}")
         coupler_lab = cv2.cvtColor(coupler_rgb, cv2.COLOR_BGR2LAB)
         coupler_lu = coupler_lab[:, :, 0].copy()
 

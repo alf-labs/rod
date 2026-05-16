@@ -13,7 +13,7 @@ if [[ "$A" == "0a" ]]; then        # full run with video 0
 elif [[ "$A" == "0at" ]]; then      # first tunnel in video 0
     # full run with video 0
     ( set -x
-    time ./_run.sh -i 0 --start 1:30 --end 2:00 -0 $ARGS $@
+    time ./_run.sh -i 0 -o output/at0_TIME.mp4 --start 1:30 --end 2:00 -0 $ARGS $@
     )
 elif [[ "$A" == "0b" ]]; then
     LATEST_JSON=$( ls -1 --sort=time output/a0_*.json | head -n 1 )

@@ -239,19 +239,14 @@ class Main:
         stats_start_main_s = time.perf_counter()
         stats_iterations = 0
 
+        pyrod_data = {}
         if self.coupler_path:
             self.read_json_file(self.coupler_path)
             if "pyrod" in self.export_content:
                 pyrod_data = self.export_content["pyrod"]
                 self.input_path = pyrod_data["input_path"]
-                if "start_frame" in pyrod_data:
-                    start = pyrod_data["start_frame"]
-                    self.start_frame = int(start)
-                if "end_frame" in pyrod_data:
-                    end = pyrod_data["end_frame"]
-                    self.end_frame = int(end)
                 self.crop_roi = pyrod_data["crop_roi"]
-                print(f"Overriding input to file '{self.input_path}', frames {self.start_frame} to {self.end_frame}, {'cropped' if self.crop_roi else 'uncropped'}")
+                print(f"Overriding input to file '{self.input_path}', {'cropped' if self.crop_roi else 'uncropped'}")
 
         display_mode = self.display_mode
         def _mouse_callback(event, x, y, flags, param):
@@ -281,16 +276,25 @@ class Main:
             self.compute_overlay = display_mode == DISPLAY_WITH_OVERLAY or self.overlay_in_video
             self.paused = False
 
+            print(f"@@ DEBUG pyrod_data {pyrod_data}")
+            loaded_start_frame = int(pyrod_data.get("start_frame", 0))
+            loaded_end_frame = int(pyrod_data.get("end_frame", 0))
             if isinstance(self.start_frame, tuple):
                 print(f"@@ Start frame: {self.start_frame} --> frame {self.start_frame[0] * fps}, fps {fps}")
                 self.start_frame = int(self.start_frame[0] * fps)
-            else:
-                print(f"@@ Start frame: {self.start_frame}, fps {fps}")
+            elif self.start_frame == 0:
+                self.start_frame = loaded_start_frame
             if isinstance(self.end_frame, tuple):
                 print(f"@@ End frame: {self.end_frame} --> frame {self.end_frame[0] * fps}, fps {fps}")
                 self.end_frame = int(self.end_frame[0] * fps)
-            else:
-                print(f"@@ End frame: {self.end_frame}, fps {fps}")
+            elif self.end_frame == 0:
+                self.end_frame = loaded_end_frame
+            if loaded_start_frame > 0:
+                self.start_frame = max(loaded_start_frame, self.start_frame)
+            if loaded_end_frame > 0:
+                self.end_frame = min(self.end_frame, loaded_end_frame)
+            print(f"@@ Start frame: {self.start_frame}, fps {fps}")
+            print(f"@@ End frame: {self.end_frame}, fps {fps}")
 
             do_crop = False
             cropped_width = vid_width
