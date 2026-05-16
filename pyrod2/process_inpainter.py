@@ -104,10 +104,11 @@ class ProcessInpainter(ProcessorBase):
         height = self.height
         c = coupler_rect.center()
         w = int(ROI_WIDTH_PCT * width)
+        y_dyn = coupler_rect.y - coupler_rect.h - COUPLER_MASK_BLUR
         if self.roi_rect is None:
-            y = coupler_rect.y - coupler_rect.h - COUPLER_MASK_BLUR
+            y = y_dyn
         else:
-            y = self.roi_rect.y
+            y = min(y_dyn, self.roi_rect.y)
         x = int(self.roi_center - w // 2)
         h = height - y
         self.roi_center = self.roi_center * 0.25 + c[0] * 0.75
