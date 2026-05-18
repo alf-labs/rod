@@ -160,10 +160,28 @@ class Detector(ProcessorBase):
         end0 = (w - 1) - np.argmax(flip_u8 > 0, axis=1)
         end2 = (w - 1) - np.argmax(flip_u8 == 255, axis=1)
 
-        overlay_view[rows, start0] = (0, 255, 255)
-        overlay_view[rows, start2] = (0,   0, 255)
-        overlay_view[rows, end2  ] = (0,   0, 255)
-        overlay_view[rows, end0  ] = (0, 255, 255)
+        # Skip all the top lines which have no mask (start2==0 is a good test for this)
+        h_start = np.argmax(start2 > 0)
+        if h_start >= h:
+            return
+        rows = rows[h_start:]
+        start0 = start0[h_start:]
+        start2 = start2[h_start:]
+        end2 = end2[h_start:]
+        end0 = end0[h_start:]
+
+        y_of7 = self.height - h
+        self._draw_poly(rows + y_of7, start0, (0, 255, 255), 2)
+        self._draw_poly(rows + y_of7, start2, (0,   0, 255), 2)
+        self._draw_poly(rows + y_of7, end2  , (0,   0, 255), 2)
+        self._draw_poly(rows + y_of7, end0  , (0, 255, 255), 2)
+
+    def _draw_poly(self, ys, xs, color, width=1):
+        # Format the points for OpenCV and draw polyline
+        # Points must be (x, y) integers in a shape of (N, 1, 2)
+        pts = np.column_stack((xs, ys)).astype(np.int32)
+        pts = pts.reshape((-1, 1, 2))
+        cv2.polylines(self.overlay, [pts], isClosed=False, color=color, thickness=width, lineType=cv2.LINE_AA)
 
     def draw_mask_line(self, mask_u8, roi_x_left, y_mask):
         _, w = mask_u8.shape
@@ -402,8 +420,8 @@ class Detector(ProcessorBase):
         blur_mask_u8 = cv2.GaussianBlur(wide_mask_u8, self.rod_blur_ksize, 0)
 
         if self.view_mask and self.compute_overlay:
-            self.draw_mask_heatmap(blur_mask_u8, 0)
-            # self.draw_mask_outline(blur_mask_u8, 0)
+            # self.draw_mask_heatmap(blur_mask_u8, 0)
+            self.draw_mask_outline(blur_mask_u8, 0)
             # self.draw_mask_line(blur_mask_u8, 0, -10)
 
         if self.inpaint_method:
