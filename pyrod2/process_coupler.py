@@ -25,12 +25,13 @@ class CouplerTracker(ProcessorBase):
     def init_size(self, width, height):
         super().init_size(width, height)
         self.roi_center = width / 2
+        self.roi_center_init = self.roi_center
 
     def init_overlay(self, frame):
         super().init_overlay(frame)
 
     def filter(self, window_title, frame_index, frame):
-        if ( (frame_index == self.start_frame or self.start_frame == 0)
+        if ( False and (frame_index == self.start_frame or self.start_frame == 0)
                 and self.couplers_fixed
                 and len(self.tracker_templates) > 0
                 and len(self.couplers) > 0 ):
@@ -170,7 +171,10 @@ class CouplerTracker(ProcessorBase):
         else:
             y = self.roi_rect.y
             h = self.roi_rect.h
-        x = int(self.roi_center - w // 2)
+        x1 = int( min(self.roi_center, self.roi_center_init) - w // 2 )
+        x2 = int( max(self.roi_center, self.roi_center_init) + w // 2 )
+        x = x1
+        w = x2 - x1
         if x < 0:
             x = 0
         elif x + w >= width:
