@@ -1,6 +1,5 @@
 import cv2
 import numpy as np
-import scipy
 from rect import Rect
 from processor import ProcessorBase
 from process_coupler import QUALITY_THRESHOLD

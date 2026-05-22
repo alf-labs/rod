@@ -18,14 +18,13 @@ try:
     import cv2
     import numpy as np
     import imutils
-    import scipy
-    from flask import Flask, render_template, Response, request, jsonify
+    from vidgear.gears import WriteGear
     from process_coupler import CouplerTracker
     from process_detector import RodDetector, ROD_W_TOP, ROD_W_BOT
     from process_inpainter import ProcessInpainter, ROD_DILATE_PX, ROD_BLUR_PX
 except ModuleNotFoundError as e:
     print(f"ERROR: Missing library. {e}")
-    print( "To fix: $ pip install opencv-python numpy scipy imutils flask")
+    print( "To fix: $ pip install opencv-python numpy imutils vidgear")
     print(f"or    : $ python {sys.argv[0]}")
     exit(1)
 
@@ -85,6 +84,7 @@ class Main:
         parser.add_argument("-d", "--display", default="full", choices=["none", "prod", "full"], help="Window Display")
         parser.add_argument("-i", "--input", default="", help="Input video")
         parser.add_argument("-o", "--output", default=OUT_VIDEO_FILE_PATH, help="Output video")
+        parser.add_argument(      "--ffmpeg-encoder", default="libx264", choices=["libx264", "h264_nvenc", "h264_qsv"], help="FFMPEG Video encoder")
         parser.add_argument("-n", "--no-video", action="store_true", help="Skip Video Output")
         parser.add_argument(      "--overlay-video", action="store_true", help="Include Overlay in Video Output")
         parser.add_argument("-r", "--roi", default="1280x720+180", help="Center ROI w/ vertical offset")
@@ -260,7 +260,7 @@ class Main:
             mouse_callback = _mouse_callback
             cv2.setMouseCallback(WINDOW_TITLE, mouse_callback)
 
-        fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+        # OBSOLETE fourcc = cv2.VideoWriter_fourcc(* args.video_fourcc)
         cap = cv2.VideoCapture(self.input_path)
         writer = None
         try:
@@ -350,8 +350,25 @@ class Main:
             print(f"@@ Start with processor #{processor_idx}: {processor}")
 
             if self.write_video:
-                writer = cv2.VideoWriter(self.output_path, fourcc, fps, (vid_width, vid_height), isColor=True)
-                print(f"@@ Writing {vid_width}x{vid_height}@{fps} fps to", self.output_path)
+                # Note: VidGear will download/install its own FFMPEG during the first run.
+                # typically as %APP_DATA%\Local\Temp\ffmpeg-static-win64-gpl\bin\ffmpeg.exe
+                # Note: Manually call ffmpeg -encoders to find supported encoders.
+                output_params = {
+                    # Typical encoder choices:
+                    #   "libx264" -- Default standard H.264 / AVC / MPEG4 encoder
+                    #   "h264_nvenc" -- NVIDIA NVENC H.264 encoder (nVidia acceleration)
+                    #   "h264_qsv" -- H.264 / AVC / MPEG-4 AVC / MPEG-4 part 10 (Intel Quick Sync Video acceleration)
+                    "-c:v": args.ffmpeg_encoder,
+                    "-profile:v": "high",
+                    "-b:v": "90000k",
+                    "-pix_fmt": "yuv420p",
+                    "-output_dimensions": (vid_width, vid_height),
+                    "-input_framerate": fps,
+                }
+                writer = WriteGear(output=self.output_path, logging=True, **output_params)
+
+                print(f"@@ Video codec Writing {vid_width}x{vid_height}@{fps} fps to", self.output_path)
+
             if self.write_json:
                 self.export_content["pyrod"] = {
                     "input_path":   self.input_path,
@@ -483,7 +500,7 @@ class Main:
             print("@@ Main loop ended.")
             self.next_processor(processor, processor_idx)
             if writer is not None:
-                writer.release()
+                writer.close()
             if self.write_json and self.should_export:
                 self.write_json_file(self.export_path, self.export_content)
             cap.release()
