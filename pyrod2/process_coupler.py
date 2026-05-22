@@ -58,7 +58,7 @@ class CouplerTracker(ProcessorBase):
             res = cv2.matchTemplate(search_lu, self.current_template.template, cv2.TM_CCOEFF_NORMED)
             _, max_val, _, max_loc = cv2.minMaxLoc(res)
 
-            med_lu = np.median(search_lu)
+            med_lu = np.percentile(search_lu, 80)
             quality = max_val * med_lu / 255
 
             if quality >= QUALITY_THRESHOLD:
