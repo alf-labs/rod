@@ -31,7 +31,7 @@ class CouplerTracker(ProcessorBase):
         super().init_overlay(frame)
 
     def filter(self, window_title, frame_index, frame):
-        if ( False and (frame_index == self.start_frame or self.start_frame == 0)
+        if ( (frame_index == self.start_frame or self.start_frame == 0)
                 and self.couplers_fixed
                 and len(self.tracker_templates) > 0
                 and len(self.couplers) > 0 ):
