@@ -82,8 +82,9 @@ class RodDetector(ProcessorBase):
 
         if not has_result:
             result = self.search_poly_rod(frame_index, w, h, lu, cr)
-            self.rods[frame_index] = result
-            self.rods_fixed = False
+            if result is not None:
+                self.rods[frame_index] = result
+                self.rods_fixed = False
         else:
             # Reuse previous result
             result = self.rods[frame_index]
@@ -173,7 +174,9 @@ class RodDetector(ProcessorBase):
         return rect
 
     def search_poly_rod(self, frame_index, w, h, lu, cr):
-        """Experiment 2: Reimplement the old pixel-based Lua search but with a numpy take."""
+        """Experiment 2: Reimplement the old pixel-based Lua search but with a numpy take.
+           Returns a RodResult or None.
+        """
 
         # CR: The current coupler rect.
         # SR: A rectangle used for debug display to display the luma curve and the thresholds.
@@ -332,18 +335,22 @@ class RodDetector(ProcessorBase):
     def fix_bent_rods(self):
         self.rods_fixed = True
 
-        c2 = np.array( [ abs(r.poly_c.coef[2]) for r in self.rods.values() ] )
+        c2 = np.array( [ abs(r.poly_c.coef[2]) for r in self.rods.values() if r.poly_c is not None ] )
         c2_abs = np.median( c2 )
         threshold = 2.25 * c2_abs
 
         remove_frames = []
 
         for frame, rod in self.rods.items():
-            c2 = rod.poly_c.coef[2]
-            is_bent = abs(c2) > threshold
-            if is_bent:
+            if rod.poly_c is None:
+                print(f"@@ [{frame:04d}] WARNING: REMOVE because poly_c is null in {rod}")
                 remove_frames.append(frame)
-                print(f"@@ [{frame:04d}] REMOVE {c2:.4f} > {threshold:.4f} --- {'THRESHOLD' if is_bent else '-'}")
+            else:
+                c2 = rod.poly_c.coef[2]
+                is_bent = abs(c2) > threshold
+                if is_bent:
+                    remove_frames.append(frame)
+                    print(f"@@ [{frame:04d}] REMOVE {c2:.4f} > {threshold:.4f} --- {'THRESHOLD' if is_bent else '-'}")
 
         # Remove frames in place in the rods dictionary
         for frame in remove_frames:

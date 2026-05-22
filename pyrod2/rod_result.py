@@ -10,6 +10,10 @@ class RodResult:
         self.initial_center = initial_center
         self.poly_c = poly_c
         self.poly_w = poly_w
+        if poly_c is None:
+            print(f"WARNING: RodResult[{frame_index:04d}] has poly_c == None")
+        if poly_w is None:
+            print(f"WARNING: RodResult[{frame_index:04d}] has poly_w == None")
 
     def to_json(self):
         return {
