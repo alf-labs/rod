@@ -13,8 +13,9 @@ QUALITY_THRESHOLD = 0.07
 SEARCH_HEIGHT_MULTIPLER = 5    # times template height
 
 class CouplerTracker(ProcessorBase):
-    def __init__(self, start_frame):
+    def __init__(self, start_frame, review=False):
         super().__init__()
+        self.review = review
         self.start_frame = start_frame
         self.current_template = None
         self.roi_rect = None
@@ -31,7 +32,8 @@ class CouplerTracker(ProcessorBase):
         super().init_overlay(frame)
 
     def filter(self, window_title, frame_index, frame):
-        if ( (frame_index == self.start_frame or self.start_frame == 0)
+        if ( not self.review
+                and (frame_index == self.start_frame or self.start_frame == 0)
                 and self.couplers_fixed
                 and len(self.tracker_templates) > 0
                 and len(self.couplers) > 0 ):

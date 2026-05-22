@@ -4,6 +4,7 @@ import numpy as np
 class ProcessorBase:
     def __init__(self):
         # Overlay is (B,G,R)
+        self.review = False
         self.overlay = None
         self.view_mask = False
         self.trigger_pause = False

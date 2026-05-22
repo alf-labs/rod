@@ -15,8 +15,9 @@ ROD_W_TOP = 20 / 1280   # Minimum rod size that must be > 80% luma noise.
 ROD_W_BOT = 80 / 1280   # Maximum rod size that must be > 80% luma noise.
 
 class RodDetector(ProcessorBase):
-    def __init__(self, coupler_tracker, rod_widths_str):
+    def __init__(self, coupler_tracker, rod_widths_str, review=False):
         super().__init__()
+        self.review = review
         self.coupler_tracker = coupler_tracker
         self.start_frame = coupler_tracker.start_frame
         self.tracker_templates = coupler_tracker.tracker_templates
@@ -49,7 +50,8 @@ class RodDetector(ProcessorBase):
         super().init_overlay(frame)
 
     def filter(self, window_info, frame_index, frame):
-        if ( (frame_index == self.start_frame or self.start_frame == 0)
+        if ( not self.review
+                and (frame_index == self.start_frame or self.start_frame == 0)
                 and self.rods_fixed
                 and len(self.rods) > 0 ):
             self.next_processor_requested = True

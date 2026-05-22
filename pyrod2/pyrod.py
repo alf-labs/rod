@@ -87,7 +87,7 @@ class Main:
         parser.add_argument(      "--ffmpeg-encoder", default="libx264", choices=["libx264", "h264_nvenc", "h264_qsv"], help="FFMPEG Video encoder")
         parser.add_argument("-n", "--no-video", action="store_true", help="Skip Video Output")
         parser.add_argument(      "--overlay-video", action="store_true", help="Include Overlay in Video Output")
-        parser.add_argument("-r", "--roi", default="1280x720+180", help="Center ROI w/ vertical offset")
+        parser.add_argument("-r", "--roi", default="1280x720+180", help="Center ROI crop w/ vertical offset")
         parser.add_argument("-s", "--start", default="0", help="Start frame")
         parser.add_argument("-e", "--end", default="0", help="End/loop frame")
         parser.add_argument(      "--no-json", action="store_true", help="Skip JSON Export")
@@ -95,6 +95,7 @@ class Main:
         parser.add_argument("-0", "--coupler-only", action="store_true", help="Only run top-coupler location process")
         parser.add_argument("-1", "--detector-only", action="store_true", help="Only run rod detector process")
         parser.add_argument(      "--load-json", default="", help="JSON data to read back")
+        parser.add_argument(      "--review", action="store_true", help="With -0 and -1, review a previous json and export a cropped video")
 
         rw_def = f"{int(ROD_W_TOP*1280)},{int(ROD_W_BOT*1280)},/1280"
         parser.add_argument(      "--rod-widths", default=rw_def, help="Detector Rod size top vs bottom")
@@ -273,6 +274,10 @@ class Main:
             loop_s = 0
             init_once = True
             processor = None
+            is_review = args.review
+            if is_review:
+                # The whole point of review mode is to view the overlay information.
+                self.overlay_in_video = True
             self.compute_overlay = display_mode == DISPLAY_WITH_OVERLAY or self.overlay_in_video
             self.paused = False
 
@@ -296,6 +301,7 @@ class Main:
             print(f"@@ Start frame: {self.start_frame}, fps {fps}")
             print(f"@@ End frame: {self.end_frame}, fps {fps}")
 
+
             do_crop = False
             cropped_width = vid_width
             cropped_height = vid_height
@@ -318,6 +324,7 @@ class Main:
             processor_idx = 0
             tracker = CouplerTracker(
                     start_frame=self.start_frame,
+                    review=args.coupler_only and is_review,
             )
             self.processors.append( tracker )
             if self.coupler_path:
@@ -328,7 +335,8 @@ class Main:
                 # Processor #1
                 detector = RodDetector(
                     tracker,
-                    rod_widths_str=args.rod_widths
+                    rod_widths_str=args.rod_widths,
+                    review=args.detector_only and is_review,
                 )
                 self.processors.append( detector )
                 if self.coupler_path:
@@ -352,19 +360,35 @@ class Main:
             if self.write_video:
                 # Note: VidGear will download/install its own FFMPEG during the first run.
                 # typically as %APP_DATA%\Local\Temp\ffmpeg-static-win64-gpl\bin\ffmpeg.exe
+                #
                 # Note: Manually call ffmpeg -encoders to find supported encoders.
-                output_params = {
-                    # Typical encoder choices:
-                    #   "libx264" -- Default standard H.264 / AVC / MPEG4 encoder
-                    #   "h264_nvenc" -- NVIDIA NVENC H.264 encoder (nVidia acceleration)
-                    #   "h264_qsv" -- H.264 / AVC / MPEG-4 AVC / MPEG-4 part 10 (Intel Quick Sync Video acceleration)
-                    "-c:v": args.ffmpeg_encoder,
-                    "-profile:v": "high",
-                    "-b:v": "90000k",
-                    "-pix_fmt": "yuv420p",
-                    "-output_dimensions": (vid_width, vid_height),
-                    "-input_framerate": fps,
-                }
+                #
+                # Typical encoder choices:
+                #   "libx264" -- Default standard H.264 / AVC / MPEG4 encoder
+                #   "h264_nvenc" -- NVIDIA NVENC H.264 encoder (nVidia acceleration)
+                #   "h264_qsv" -- H.264 / AVC / MPEG-4 AVC / MPEG-4 part 10 (Intel Quick Sync Video acceleration)
+
+                if not is_review:
+                    # Output the full original video size.
+                    output_params = {
+                        "-c:v": args.ffmpeg_encoder,
+                        "-profile:v": "high",
+                        "-b:v": "90000k",
+                        "-pix_fmt": "yuv420p",
+                        "-output_dimensions": (vid_width, vid_height),
+                        "-input_framerate": fps,
+                    }
+                else:
+                    # Output a "review" video with only the cropped image, in a lower quality.
+                    output_params = {
+                        "-c:v": args.ffmpeg_encoder,
+                        "-preset": "fast",          # configure based on encoding speed, not quality
+                        "-b:v": "45000k",
+                        "-pix_fmt": "yuv420p",
+                        "-output_dimensions": (width, height),
+                        "-input_framerate": fps,
+                    }
+
                 writer = WriteGear(output=self.output_path, logging=True, **output_params)
 
                 print(f"@@ Video codec Writing {vid_width}x{vid_height}@{fps} fps to", self.output_path)
@@ -479,7 +503,7 @@ class Main:
                         video_frame = original_frame
                     if do_downscale == 2:
                         video_frame = cv2.resize(video_frame, (0,0), fx=2, fy=2, interpolation=cv2.INTER_NEAREST)
-                    if do_crop:
+                    if do_crop and not is_review:
                         uncropped_frame[crop_y1:crop_y2, crop_x1:crop_x2] = video_frame
                         video_frame = uncropped_frame
                     writer.write(video_frame)
