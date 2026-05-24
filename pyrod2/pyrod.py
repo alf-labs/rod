@@ -263,6 +263,9 @@ class Main:
 
         # OBSOLETE fourcc = cv2.VideoWriter_fourcc(* args.video_fourcc)
         cap = cv2.VideoCapture(self.input_path)
+        if not cap.isOpened():
+            print(f"ERROR: Failed to open input file '{self.input_path}'")
+            sys.exit(1)
         writer = None
         try:
             # Get input video properties
@@ -412,8 +415,19 @@ class Main:
             frame_count = self.start_frame
             frame_index = frame_count
             do_downscale = 1  # can be either 1 or 2
-            print(f"@@ Reader cap isOpened: {cap.isOpened()}, {width}x{height}@{fps} fps")
+            print(f"@@ Reader cap isOpened: {cap.isOpened()}, {width}x{height}@{fps} fps, start frame {self.start_frame}")
+
+            if self.start_frame > 25:
+                s = int(self.start_frame / 25)
+                m = s // 60
+                s = s - 60 * m
+                print(f"@@ WARNING: Seeking to start frame {self.start_frame} is expected to take about {m} min {s} seconds")
+
+            seek_s = time.perf_counter()
             cap.set(cv2.CAP_PROP_POS_FRAMES, self.start_frame)
+            seek_s = time.perf_counter() - seek_s
+            print(f"@@ Starting reader on frame {cap.get(cv2.CAP_PROP_POS_FRAMES)} after {seek_s} seconds")
+
             while cap.isOpened() and not self.quit_requested:
                 stats_iterations += 1
                 self.parse_keys(processor)
